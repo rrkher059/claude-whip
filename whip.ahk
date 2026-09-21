@@ -86,17 +86,19 @@ ArgHistIdx    := 0
 HUD_TAB_W := 92
 HUD_TAB_H := 26
 HUD_PAN_W := 246
-HUD_PAN_H := 128
+HUD_PAN_H := 158
 
 ; command name -> behaviour. Attached to the command rather than the key so a
 ; remapped binding keeps sane semantics.
-NeedsArgs    := Map("decide", true, "debt", true)
+NeedsArgs    := Map("decide", true, "debt", true, "why", true)
 NeedsConfirm := Map("ship", true)
 
 DEFAULT_KEYS := [ ["F1","whip"],  ["F2","redteam"], ["F3","ship"]
                 , ["F4","decide"],["F5","scale"],   ["F6","unstuck"]
                 , ["+F1","orient"],["+F2","secure"],["+F3","test"]
-                , ["+F4","debt"], ["+F5","user"],   ["+F6","handoff"] ]
+                , ["+F4","debt"], ["+F5","user"],   ["+F6","handoff"]
+                , ["^F1","cost"], ["^F2","why"],    ["^F3","simplify"]
+                , ["^F4","onboard"] ]
 
 ; ---------------------------------------------------------------------------
 ; themes - add one in four lines: pick ten colours, give it a name, done.
@@ -127,6 +129,15 @@ HotIfFn := (*) => IsClaude()
 FirstRun := !FileExist(IniPath)
 LoadCfg()
 LoadDescs()
+; --doctor prints a health report to stdout and exits. It runs before any
+; window is created, so it is safe to pipe.
+for arg in A_Args {
+    if (arg = "--doctor") {
+        Doctor()
+        ExitApp()
+    }
+}
+
 BuildOverlays()
 
 ; --test: one slow, loud crack on demand, then quit. No hotkeys, no HUD, so
@@ -182,6 +193,7 @@ WriteDefaultCfg() {
     IniWrite("1",      IniPath, "whip", "shake")
     IniWrite("br",     IniPath, "whip", "hudcorner")
     IniWrite("^!p",    IniPath, "whip", "palette")
+    IniWrite("ship",   IniPath, "whip", "confirm")
     for pair in DEFAULT_KEYS
         IniWrite(pair[2], IniPath, "keys", pair[1])
 }
@@ -220,6 +232,18 @@ LoadCfg() {
     Cfg["shake"]   := IniRead(IniPath, "whip", "shake",   "1") + 0
     Cfg["theme"]   := Trim(IniRead(IniPath, "whip", "theme", "leather"))
     Cfg["palette"]   := Trim(IniRead(IniPath, "whip", "palette", "^!p"))
+
+    ; Which commands need a double-tap. Keyed on the command, not the key, so
+    ; remapping a binding keeps its safety. Default is ship alone - the other
+    ; writers only touch a file in the repo, which git can undo.
+    Cfg["confirm"]   := Trim(IniRead(IniPath, "whip", "confirm", "ship"))
+    global NeedsConfirm
+    NeedsConfirm := Map()
+    for c in StrSplit(Cfg["confirm"], ",") {
+        c := Trim(c)
+        if (c != "")
+            NeedsConfirm[c] := true
+    }
     Cfg["hudcorner"] := Trim(IniRead(IniPath, "whip", "hudcorner", "br"))
     if (!InStr("tl tr bl br", Cfg["hudcorner"]))
         Cfg["hudcorner"] := "br"
@@ -878,8 +902,8 @@ BuildHud() {
     HudPanel.SetFont("s8 Bold", "Consolas")
     HudPanel.Add("Text", "x0 y5 w" (HUD_PAN_W - 2) " h15 Center BackgroundTrans cC9A227", "~ claude whip ~")
     HudPanel.SetFont("s8 Norm", "Consolas")
-    HudPanel.Add("Text", "x10 y24 w112 h96 BackgroundTrans c8A7F72", col1)
-    HudPanel.Add("Text", "x126 y24 w112 h96 BackgroundTrans c8A7F72", col2)
+    HudPanel.Add("Text", "x10 y24 w112 h124 BackgroundTrans c8A7F72", col1)
+    HudPanel.Add("Text", "x126 y24 w112 h124 BackgroundTrans c8A7F72", col2)
     HudPanel.SetFont("s7 Norm", "Consolas")
     HudPanel.Add("Text", "x0 y" (HUD_PAN_H - 16) " w" (HUD_PAN_W - 2) " h12 Center BackgroundTrans c6A6056"
                , PrettyChord(Cfg["palette"]) " for all commands")
@@ -1628,6 +1652,169 @@ BindKeys() {
     HotIf()
 
     LogLine("bound " ok "/" Keys.Length " hotkeys; titles=" Cfg["titles"] (bad != "" ? "; FAILED: " bad : ""))
+}
+
+; ---------------------------------------------------------------------------
+; --doctor
+; ---------------------------------------------------------------------------
+Say(t := "") {
+    try FileAppend(t "`n", "*", "UTF-8")
+}
+
+Rule() {
+    Say("--------------------------------------------------------------------")
+}
+
+Doctor() {
+    global Cfg, IniPath, LogPath, WavPath, DEFAULT_KEYS
+    problems := 0
+
+    Say("claude-whip doctor")
+    Rule()
+
+    ; --- AutoHotkey -------------------------------------------------------
+    Say("AutoHotkey")
+    Say("  version      : " A_AhkVersion)
+    Say("  exe          : " A_AhkPath)
+    Say("  script       : " A_ScriptFullPath)
+    Say("  screen       : " A_ScreenWidth "x" A_ScreenHeight " @ " A_ScreenDPI " dpi"
+        . (A_ScreenDPI = 96 ? " (100% scaling)" : " (scaled - report this if the whip looks wrong)"))
+    Say()
+
+    ; --- sound ------------------------------------------------------------
+    Say("sound")
+    Say("  wav          : " WavPath)
+    if (!FileExist(WavPath)) {
+        problems += 1
+        Say("  status       : MISSING - falls back to SoundBeep")
+        Say("  fix          : powershell -ExecutionPolicy Bypass -File gen-whip-wav.ps1")
+    } else {
+        try {
+            buf  := FileRead(WavPath, "RAW")
+            tag  := StrGet(buf.Ptr, 4, "CP0")
+            fmt  := StrGet(buf.Ptr + 8, 4, "CP0")
+            ch   := NumGet(buf,  22, "UShort")
+            rate := NumGet(buf,  24, "UInt")
+            bits := NumGet(buf,  34, "UShort")
+            peak := 0, i := 44
+            while (i + 1 < buf.Size) {
+                v := NumGet(buf, i, "Short")
+                if (v < 0)
+                    v := -v
+                if (v > peak)
+                    peak := v
+                i += 2
+            }
+            secs := Round((buf.Size - 44) / (rate * ch * (bits / 8)), 3)
+            Say("  header       : " tag "/" fmt "  " rate " Hz, " ch " ch, " bits "-bit")
+            Say("  size         : " buf.Size " bytes (" secs " s)")
+            Say("  peak amp     : " peak " of 32767 (" Round(peak / 327.67) "% of full scale)")
+            if (tag != "RIFF" || fmt != "WAVE") {
+                problems += 1
+                Say("  status       : BAD HEADER - not a RIFF/WAVE file")
+            } else if (peak < 3000) {
+                problems += 1
+                Say("  status       : TOO QUIET - regenerate with gen-whip-wav.ps1")
+            } else {
+                Say("  status       : ok")
+            }
+        } catch as e {
+            problems += 1
+            Say("  status       : UNREADABLE (" e.Message ")")
+        }
+    }
+    Say()
+
+    ; --- skills -----------------------------------------------------------
+    root := EnvGet("USERPROFILE") "\.claude\skills"
+    Say("skills  (" root ")")
+    missing := 0
+    for pair in DEFAULT_KEYS {
+        cmd := pair[2]
+        f   := root "\" cmd "\SKILL.md"
+        if (FileExist(f)) {
+            Say("  " Format("{:-8}", KeyLabel(pair[1])) Format("{:-10}", "/" cmd) "ok")
+        } else {
+            missing += 1
+            Say("  " Format("{:-8}", KeyLabel(pair[1])) Format("{:-10}", "/" cmd) "MISSING")
+        }
+    }
+    if (missing) {
+        problems += 1
+        Say("  " missing " of " DEFAULT_KEYS.Length " missing")
+        Say("  fix          : Copy-Item .\skills\* `"$env:USERPROFILE\.claude\skills\`" -Recurse -Force")
+    } else {
+        Say("  all " DEFAULT_KEYS.Length " present")
+    }
+    Say()
+
+    ; --- detection --------------------------------------------------------
+    Say("detection")
+    Say("  titles=      : " Cfg["titles"])
+    try {
+        t := WinGetTitle("A")
+        Say("  active window: " (t = "" ? "(none)" : t))
+        if (ActiveIsOurs())
+            Say("  matches      : n/a (that window belongs to claude-whip itself)")
+        else if (MatchTitle(t))
+            Say("  matches      : YES - hotkeys are live there")
+        else {
+            problems += 1
+            Say("  matches      : NO - hotkeys stay inert in that window")
+            Say("  fix          : run with --pick, or set titles= to part of the real title")
+        }
+    } catch {
+        Say("  active window: (could not read)")
+    }
+    Say()
+
+    ; --- config -----------------------------------------------------------
+    Say("config")
+    Say("  path         : " IniPath)
+    if (!FileExist(IniPath)) {
+        Say("  status       : missing - defaults will be written on next start")
+    } else {
+        bom := "none"
+        try {
+            raw := FileRead(IniPath, "RAW")
+            if (raw.Size >= 3 && NumGet(raw, 0, "UChar") = 0xEF
+                && NumGet(raw, 1, "UChar") = 0xBB && NumGet(raw, 2, "UChar") = 0xBF)
+                bom := "PRESENT - stripped automatically at startup"
+        }
+        Say("  utf-8 bom    : " bom)
+        Say("  theme        : " Cfg["theme"])
+        Say("  palette      : " Cfg["palette"] "  (" PrettyChord(Cfg["palette"]) ")")
+        Say("  animate/hud  : " Cfg["animate"] " / " Cfg["hud"])
+        Say("  shake/volume : " Cfg["shake"] " / " Cfg["volume"])
+        Say("  debug        : " Cfg["debug"] (Cfg["debug"] ? "" : "  (set to 1 to log why detection fails)"))
+    }
+    Say()
+
+    ; --- recent trouble ---------------------------------------------------
+    Say("last log errors  (" LogPath ")")
+    if (!FileExist(LogPath)) {
+        Say("  (no log yet - set debug=1 in config.ini to create one)")
+    } else {
+        hits := []
+        try {
+            for ln in StrSplit(FileRead(LogPath, "UTF-8"), "`n") {
+                if (InStr(ln, "FAILED") || InStr(ln, "THREW") || InStr(ln, "no match")
+                    || InStr(ln, "perf:") || InStr(ln, "unknown theme"))
+                    hits.Push(Trim(ln, " `t`r"))
+            }
+        }
+        if (!hits.Length)
+            Say("  none")
+        else {
+            from := Max(1, hits.Length - 4)
+            Loop hits.Length - from + 1
+                Say("  " hits[from + A_Index - 1])
+        }
+    }
+    Say()
+
+    Rule()
+    Say(problems = 0 ? "VERDICT: healthy" : "VERDICT: " problems " problem(s) above")
 }
 
 ; ---------------------------------------------------------------------------

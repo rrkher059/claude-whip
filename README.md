@@ -1,14 +1,14 @@
 # claude-whip
 
-Twelve hotkeys that fire pre-written, high-leverage slash commands into Claude Code running in a terminal. Each press plays a synthesized whip crack and draws a photoreal leather bullwhip lashing across the entire screen.
+Sixteen hotkeys that fire pre-written, high-leverage slash commands into Claude Code running in a terminal. Each press plays a synthesized whip crack and draws a photoreal leather bullwhip lashing across the entire screen.
 
 **It does not make the model think faster. Nothing can.** There is no prompt, no hotkey, and no tool that changes how quickly Claude reasons. What this does is make the prompts you never bother typing cost one keystroke.
 
-That is the whole pitch. The prompts in this repo are ones most people know they *should* send — a hostile pre-merge review, a scaling and cost check, a decision record, a handoff note — and don't, because typing three hundred words of careful instruction at the moment you are tired and almost done is a tax nobody pays. Binding them to F1–F6 removes the tax. The whip is there so it feels like something happened.
+That is the whole pitch. The prompts in this repo are ones most people know they *should* send — a hostile pre-merge review, a scaling and cost check, a decision record, a handoff note — and don't, because typing three hundred words of careful instruction at the moment you are tired and almost done is a tax nobody pays. Binding them to a function key removes the tax. The whip is there so it feels like something happened.
 
 ---
 
-## The twelve bindings
+## The sixteen bindings
 
 | Key | Command | What it actually buys you |
 |---|---|---|
@@ -24,6 +24,10 @@ That is the whole pitch. The prompts in this repo are ones most people know they
 | `Shift+F4` | `/debt` | The three worst things in the repo ranked by **six-month cost, not ugliness**, with fix-now vs fix-later estimates. "Leave it" is an allowed and frequently correct verdict. Prompts for optional focus. |
 | `Shift+F5` | `/user` | Walks your actual entry path as a first-time user. Where confusion starts, every step between arriving and value, what breaks on mobile / with no data / with a typo, and the one change that moves activation. |
 | `Shift+F6` | `/handoff` | Overwrites `HANDOFF.md` so a zero-context session resumes exactly where you stopped: state, literal next action, traps, open questions. |
+| `Ctrl+F1` | `/cost` | Finds every paid model call in the repo and estimates the monthly bill at stated usage, naming the single call path responsible for most of it. |
+| `Ctrl+F2` | `/why` | Takes a file or function, runs `git log -p --follow` on it, and explains why the code is that way from its real history — including the scar tissue and what was already tried and reverted. Prompts for the target. |
+| `Ctrl+F3` | `/simplify` | The three functions with the worst complexity-to-value ratio, each with the actual diff it could become and proof the complexity isn't earning its keep. |
+| `Ctrl+F4` | `/onboard` | Generates `CONTRIBUTING.md` from what the repo actually does — setup commands verified against lockfiles and CI, not boilerplate. |
 
 Every skill is marked `disable-model-invocation: true`. These are deliberate manual triggers — Claude will never decide on its own that now is a good time to run `/ship`.
 
@@ -51,7 +55,7 @@ cd claude-whip
 powershell -ExecutionPolicy Bypass -File .\gen-whip-wav.ps1   # synthesizes whip.wav
 ```
 
-Install the twelve skills and start it:
+Install the sixteen skills and start it:
 
 ```powershell
 Copy-Item .\skills\* "$env:USERPROFILE\.claude\skills\" -Recurse -Force
@@ -78,14 +82,35 @@ theme=leather       ; leather | midnight | ember | bone
 shake=1             ; one-frame screen shake on the snap
 hudcorner=br        ; tl | tr | bl | br - set by dragging the tab, saved here
 palette=^!p         ; command palette chord: ^ Ctrl, + Shift, ! Alt, # Win
+confirm=ship        ; comma-separated commands that need a double-tap first
 
 [keys]
 F1=whip
 F2=redteam
-...                 ; all twelve are freely remappable
+...                 ; all sixteen are freely remappable
 ```
 
-Behavior follows the **command**, not the key: `ship` always double-taps to confirm and `decide` / `debt` always prompt for arguments, wherever you bind them.
+Behavior follows the **command**, not the key: `ship` always double-taps to confirm and `decide` / `debt` / `why` always prompt for arguments, wherever you bind them. Remapping a binding therefore keeps its safety.
+
+### Which commands write something
+
+Five of the sixteen change state rather than just producing a reply:
+
+| command | what it writes |
+|---|---|
+| `/ship` | commits **and pushes** to the current branch |
+| `/decide` | appends to `DECISIONS.md` |
+| `/test` | adds a test file, then runs it |
+| `/handoff` | overwrites `HANDOFF.md` |
+| `/onboard` | overwrites `CONTRIBUTING.md` |
+
+Only `/ship` requires a double-tap by default, because it is the only one that leaves your machine. The other four write a single file inside the repo, which `git checkout` undoes. If you want more of them guarded, list them:
+
+```ini
+confirm=ship,handoff,onboard
+```
+
+A guarded command shows `press again to <command>` on the first tap and arms for 900ms. Anything not in the list fires immediately. Separately, **Ctrl+Z within 2 seconds of any fire** sends Escape to interrupt Claude and toasts `cancelled`; outside that window Ctrl+Z is not intercepted at all.
 
 Tray menu: reload config, open config, open log, pick Claude window, show welcome, toggle HUD, pause hotkeys, exit.
 
