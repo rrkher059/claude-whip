@@ -28,6 +28,10 @@ DetectHiddenWindows(true)
 IniPath := A_ScriptDir "\config.ini"
 LogPath := A_ScriptDir "\whip.log"
 WavPath := A_ScriptDir "\whip.wav"
+StatsPath := A_ScriptDir "\stats.csv"
+
+WHIP_VERSION := "2.0.0"
+WHIP_REPO    := "rrkher059/claude-whip"
 
 ; Everything at script scope is already global in v2.
 Cfg        := Map()
@@ -67,6 +71,7 @@ UndoUntil     := 0
 UndoTarget    := 0
 ArgHist       := []
 WelcomeWin    := ""
+StatsWin      := ""
 NagWin        := ""
 PickWin       := ""
 PickList      := ""
@@ -163,6 +168,7 @@ BindKeys()
 BuildTray()
 SetTimer(UpdateHud, 150)
 SetTimer(DetectTick, 2000)
+SetTimer(CheckUpdate, -6000)      ; once, well after startup; never blocks
 
 wantWelcome := FirstRun
 for arg in A_Args {
@@ -174,6 +180,8 @@ for arg in A_Args {
     ; depending on a synthetic keystroke reaching the hook
     if (arg = "--palette")
         SetTimer(ShowPalette, -300)
+    if (arg = "--stats")
+        SetTimer(ShowStats, -300)
 }
 if (wantWelcome)
     ShowWelcome()
@@ -1172,6 +1180,7 @@ Fire(key, cmd, *) {
 
     UndoUntil  := A_TickCount + 2000    ; Ctrl+Z interrupts for the next 2s
     UndoTarget := target
+    RecordFire(cmd, target)
     Toast("/" cmd)
 }
 
@@ -1818,6 +1827,185 @@ Doctor() {
 }
 
 ; ---------------------------------------------------------------------------
+; usage stats
+; ---------------------------------------------------------------------------
+; The third column is the window title, not the working directory. A terminal
+; window belongs to the terminal host rather than the shell inside it, and
+; with tabs there is no reliable way to know which shell is in front, so a
+; "cwd" column would be whip's own directory dressed up as yours.
+CsvEscape(t) {
+    t := StrReplace(t, "`"", "`"`"")
+    return "`"" t "`""
+}
+
+RecordFire(cmd, hwnd) {
+    global StatsPath
+    try {
+        title := hwnd ? WinGetTitle("ahk_id " hwnd) : ""
+    } catch
+        title := ""
+    try {
+        if (!FileExist(StatsPath))
+            FileAppend("timestamp,command,window`n", StatsPath, "UTF-8")
+        FileAppend(FormatTime(A_Now, "yyyy-MM-dd HH:mm:ss") "," cmd "," CsvEscape(title) "`n"
+                 , StatsPath, "UTF-8")
+    }
+}
+
+ShowStats(*) {
+    global StatsPath, StatsWin, Keys
+
+    if (IsObject(StatsWin))
+        try StatsWin.Destroy()
+
+    if (!FileExist(StatsPath)) {
+        Notify("no stats yet - fire a command first")
+        return
+    }
+
+    perCmd := Map(), perDay := Map(), total := 0, first := ""
+    try {
+        for i, ln in StrSplit(FileRead(StatsPath, "UTF-8"), "`n") {
+            ln := Trim(ln, " `t`r")
+            if (ln = "" || i = 1)
+                continue
+            parts := StrSplit(ln, ",", , 3)
+            if (parts.Length < 2)
+                continue
+            ts := parts[1], cmd := parts[2]
+            day := SubStr(ts, 1, 10)
+            perCmd[cmd] := perCmd.Has(cmd) ? perCmd[cmd] + 1 : 1
+            perDay[day] := perDay.Has(day) ? perDay[day] + 1 : 1
+            if (first = "")
+                first := day
+            total += 1
+        }
+    }
+    if (!total) {
+        Notify("stats.csv has no entries yet")
+        return
+    }
+
+    ; commands, most used first
+    cmds := []
+    for c, n in perCmd
+        cmds.Push({cmd: c, n: n})
+    Loop cmds.Length - 1 {
+        i := A_Index
+        Loop cmds.Length - i {
+            j := A_Index
+            if (cmds[j].n < cmds[j + 1].n) {
+                tmp := cmds[j], cmds[j] := cmds[j + 1], cmds[j + 1] := tmp
+            }
+        }
+    }
+
+    body := "", top := cmds[1].cmd
+    for c in cmds {
+        bar := ""
+        w := Round(28.0 * c.n / cmds[1].n)
+        Loop Max(w, 1)
+            bar .= Chr(0x2588)
+        body .= Format("{:-10}", "/" c.cmd) Format("{:5}", c.n) "  " bar "`n"
+    }
+
+    ; last 7 days present in the file
+    days := []
+    for d, n in perDay
+        days.Push(d)
+    Loop days.Length - 1 {
+        i := A_Index
+        Loop days.Length - i {
+            j := A_Index
+            ; StrCompare, not "<": AHK v2 tries to compare "2026-09-16"
+            ; numerically and throws "Expected a Number but got a String"
+            if (StrCompare(days[j], days[j + 1]) < 0) {
+                tmp := days[j], days[j] := days[j + 1], days[j + 1] := tmp
+            }
+        }
+    }
+    dayBody := ""
+    Loop Min(7, days.Length) {
+        d := days[A_Index]
+        dayBody .= d "   " Format("{:4}", perDay[d]) "`n"
+    }
+
+    unused := ""
+    for pair in Keys {
+        if (!perCmd.Has(pair[2]))
+            unused .= (unused = "" ? "" : ", ") "/" pair[2]
+    }
+
+    StatsWin := Gui("+AlwaysOnTop -MaximizeBox", "claude whip - stats")
+    StatsWin.BackColor := "181410"
+    StatsWin.MarginX := 20, StatsWin.MarginY := 16
+    StatsWin.SetFont("s11 Bold", "Consolas")
+    StatsWin.Add("Text", "cC9A227", total " fires since " first)
+    StatsWin.SetFont("s9 Norm", "Consolas")
+    StatsWin.Add("Text", "c8A7F72 y+10", "most used: /" top)
+    StatsWin.SetFont("s9 Bold", "Consolas")
+    StatsWin.Add("Text", "cC9A227 y+14", "by command")
+    StatsWin.SetFont("s9 Norm", "Consolas")
+    StatsWin.Add("Text", "cBFB3A4 w420", RTrim(body, "`n"))
+    StatsWin.SetFont("s9 Bold", "Consolas")
+    StatsWin.Add("Text", "cC9A227 y+14", "by day")
+    StatsWin.SetFont("s9 Norm", "Consolas")
+    StatsWin.Add("Text", "cBFB3A4 w420", RTrim(dayBody, "`n"))
+    if (unused != "") {
+        StatsWin.SetFont("s8 Norm", "Consolas")
+        StatsWin.Add("Text", "c6A6056 w420 y+14", "never fired: " unused)
+    }
+    b := StatsWin.Add("Button", "y+14 w130", "Open stats.csv")
+    b.OnEvent("Click", (*) => RunSafe(StatsPath))
+    StatsWin.OnEvent("Close", (*) => StatsWin.Destroy())
+    StatsWin.OnEvent("Escape", (*) => StatsWin.Destroy())
+    StatsWin.Show("AutoSize Center")
+}
+
+; ---------------------------------------------------------------------------
+; update check - once a day, never blocking, never automatic
+; ---------------------------------------------------------------------------
+VersionNewer(a, b) {          ; is a newer than b, both like 2.0.0
+    pa := StrSplit(StrReplace(a, "v", ""), "."), pb := StrSplit(StrReplace(b, "v", ""), ".")
+    Loop 3 {
+        x := pa.Has(A_Index) ? Integer(pa[A_Index]) : 0
+        y := pb.Has(A_Index) ? Integer(pb[A_Index]) : 0
+        if (x > y)
+            return true
+        if (x < y)
+            return false
+    }
+    return false
+}
+
+CheckUpdate(*) {
+    global IniPath, WHIP_VERSION, WHIP_REPO
+    today := FormatTime(A_Now, "yyyy-MM-dd")
+    if (Trim(IniRead(IniPath, "whip", "lastcheck", "")) = today)
+        return
+    try IniWrite(today, IniPath, "whip", "lastcheck")
+    try {
+        req := ComObject("WinHttp.WinHttpRequest.5.1")
+        req.SetTimeouts(3000, 3000, 3000, 4000)
+        req.Open("GET", "https://api.github.com/repos/" WHIP_REPO "/releases/latest", true)
+        req.SetRequestHeader("User-Agent", "claude-whip/" WHIP_VERSION)
+        req.Send()
+        req.WaitForResponse(5)
+        if (req.Status != 200)
+            return
+        if (!RegExMatch(req.ResponseText, '"tag_name"\s*:\s*"([^"]+)"', &m))
+            return
+        latest := m[1]
+        if (VersionNewer(latest, WHIP_VERSION)) {
+            LogLine("update available: " latest " (running " WHIP_VERSION ")")
+            TrayTip("claude whip " latest " is available"
+                  , "You are running " WHIP_VERSION ". github.com/" WHIP_REPO "/releases")
+        }
+    }
+    ; offline, rate-limited or no releases yet: silently do nothing
+}
+
+; ---------------------------------------------------------------------------
 ; tray
 ; ---------------------------------------------------------------------------
 BuildTray() {
@@ -1826,6 +2014,7 @@ BuildTray() {
     A_TrayMenu.Add("Open config", OpenConfig)
     A_TrayMenu.Add("Open log", OpenLog)
     A_TrayMenu.Add()
+    A_TrayMenu.Add("Show stats", ShowStats)
     A_TrayMenu.Add("Pick Claude window", ShowPicker)
     A_TrayMenu.Add("Show welcome", (*) => ShowWelcome())
     A_TrayMenu.Add()

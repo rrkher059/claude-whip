@@ -1,6 +1,7 @@
 # local runtime state - yours, not the repo's
 whip.log
 config.ini
+stats.csv
 
 # local claude code permission state
 .claude/settings.local.json
