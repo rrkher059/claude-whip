@@ -1,5 +1,11 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
+
+; Regions are computed and applied to the overlays while they are still
+; hidden, so the first frame appears already shaped instead of flashing a
+; full-screen rectangle. Without this, "ahk_id" cannot match a hidden window
+; and every WinSetRegion/WinSetTransparent fails with "Target window not found".
+DetectHiddenWindows(true)
 ;
 ; claude-whip - twelve hotkeys that fire pre-written slash commands into
 ; Claude Code, each with a synthesized whip crack and a full-screen bullwhip.
@@ -37,7 +43,7 @@ HudShown   := false
 HudX       := -99999
 HudY       := -99999
 Registered := []
-ConfirmAt  := Map()
+ConfirmAt  := 0
 
 ; command name -> behaviour. Attached to the command rather than the key so a
 ; remapped binding keeps sane semantics.
@@ -53,6 +59,21 @@ HotIfFn := (*) => IsClaude()
 
 LoadCfg()
 BuildOverlays()
+
+; --test: one slow, loud crack on demand, then quit. No hotkeys, no HUD, so
+; it can be verified without switching windows or focusing Claude.
+for arg in A_Args {
+    if (arg = "--test") {
+        Cfg["debug"] := 1
+        LogLine("--test: screen " A_ScreenWidth "x" A_ScreenHeight ", DPI " A_ScreenDPI ", wav " WavPath)
+        PlayCrackSound()
+        Crack(200)                  ; ~3.6s instead of ~220ms
+        LogLine("--test: finished")
+        Sleep(400)
+        ExitApp()
+    }
+}
+
 BuildHud()
 BindKeys()
 BuildTray()
@@ -268,7 +289,9 @@ PolyFromSpine(pts, wmul := 1.0, lateral := 0.0) {
         fwd  .= Round(cx + pt.px * hw) "-" Round(cy + pt.py * hw) " "
         back := Round(cx - pt.px * hw) "-" Round(cy - pt.py * hw) " " back
     }
-    return fwd back "Polygon"
+    ; No "Polygon" keyword: AHK v2 rejects it outright. Three or more bare
+    ; points already produce a polygonal region.
+    return RTrim(fwd back)
 }
 
 ; A short band across the grip, so the handle reads as bound leather.
@@ -282,7 +305,7 @@ BandPoly(pts, sCenter, halfLen, hwMul) {
     hw := pt.w * hwMul
     ax := pt.x + pt.tx * halfLen, ay := pt.y + pt.ty * halfLen
     bx := pt.x - pt.tx * halfLen, by := pt.y - pt.ty * halfLen
-    return Round(ax + pt.px*hw) "-" Round(ay + pt.py*hw) " " Round(bx + pt.px*hw) "-" Round(by + pt.py*hw) " " Round(bx - pt.px*hw) "-" Round(by - pt.py*hw) " " Round(ax - pt.px*hw) "-" Round(ay - pt.py*hw) " Polygon"
+    return Round(ax + pt.px*hw) "-" Round(ay + pt.py*hw) " " Round(bx + pt.px*hw) "-" Round(by + pt.py*hw) " " Round(bx - pt.px*hw) "-" Round(by - pt.py*hw) " " Round(ax - pt.px*hw) "-" Round(ay - pt.py*hw)
 }
 
 SparkPoly(cx, cy, angleDeg, len, halfW) {
@@ -290,16 +313,19 @@ SparkPoly(cx, cy, angleDeg, len, halfW) {
     dx := Cos(a), dy := Sin(a)
     px := -dy,    py := dx
     ex := cx + dx * len, ey := cy + dy * len
-    return Round(cx + px*halfW) "-" Round(cy + py*halfW) " " Round(ex + px*0.6) "-" Round(ey + py*0.6) " " Round(ex - px*0.6) "-" Round(ey - py*0.6) " " Round(cx - px*halfW) "-" Round(cy - py*halfW) " Polygon"
+    return Round(cx + px*halfW) "-" Round(cy + py*halfW) " " Round(ex + px*0.6) "-" Round(ey + py*0.6) " " Round(ex - px*0.6) "-" Round(ey - py*0.6) " " Round(cx - px*halfW) "-" Round(cy - py*halfW)
 }
 
 ; ---------------------------------------------------------------------------
 ; overlay windows
 ; ---------------------------------------------------------------------------
 MakeOverlay(colour) {
-    ; -Caption +AlwaysOnTop +ToolWindow +E0x20 (WS_EX_TRANSPARENT) +Disabled
-    ; makes it click-through, out of alt-tab, and incapable of taking focus.
-    g := Gui("-Caption +AlwaysOnTop +ToolWindow +E0x20 +Disabled -DPIScale")
+    ; E0x08000020 = WS_EX_NOACTIVATE | WS_EX_TRANSPARENT.
+    ; TRANSPARENT alone only makes it click-through - the window can still be
+    ; activated, and hiding an activated window leaves focus unsettled long
+    ; enough to swallow the keystrokes we send immediately afterwards.
+    ; NOACTIVATE means it never takes focus in the first place.
+    g := Gui("-Caption +AlwaysOnTop +ToolWindow +E0x08000020 +Disabled -DPIScale")
     g.BackColor := colour
     g.Show("NA x0 y0 w" A_ScreenWidth " h" A_ScreenHeight)
     WinSetTransparent(0, "ahk_id " g.Hwnd)
@@ -321,9 +347,15 @@ BuildOverlays() {
         Win["s" A_Index] := MakeOverlay("FFF4D6")
 }
 
-SetRegion(key, spec) {
+SetRegion(key, spec, frame := 0) {
     global Win
-    try WinSetRegion(spec, "ahk_id " Win[key].Hwnd)   ; a bad frame is skipped, not fatal
+    ; A bad frame is skipped rather than fatal, but it is never silent:
+    ; swallowing these is what hid the Polygon-keyword bug.
+    try {
+        WinSetRegion(spec, "ahk_id " Win[key].Hwnd)
+    } catch as e {
+        LogLine("WinSetRegion FAILED frame " frame " layer " key ": " e.Message " | " SubStr(spec, 1, 120))
+    }
 }
 
 ShowWin(key, alpha) {
@@ -331,6 +363,8 @@ ShowWin(key, alpha) {
     try {
         WinSetTransparent(alpha, "ahk_id " Win[key].Hwnd)
         Win[key].Show("NA x0 y0 w" A_ScreenWidth " h" A_ScreenHeight)
+    } catch as e {
+        LogLine("ShowWin FAILED layer " key ": " e.Message)
     }
 }
 
@@ -348,7 +382,7 @@ HideAll() {
 ; ---------------------------------------------------------------------------
 ; the animation
 ; ---------------------------------------------------------------------------
-Crack() {
+Crack(frameMs := 12) {
     global Win, Animating
 
     W := A_ScreenWidth, H := A_ScreenHeight
@@ -362,13 +396,13 @@ Crack() {
             t := (f - 1) / (FRAMES - 1)
 
             spine := WhipSpine(t, W, H)
-            SetRegion("g1", PolyFromSpine(WhipSpine(t - 0.10, W, H)))
-            SetRegion("g2", PolyFromSpine(WhipSpine(t - 0.05, W, H)))
-            SetRegion("body", PolyFromSpine(spine))
-            SetRegion("hi",   PolyFromSpine(spine, 0.30, 0.45))
-            SetRegion("b1",   BandPoly(spine, 0.014, 3.2, 1.35))
-            SetRegion("b2",   BandPoly(spine, 0.038, 3.0, 1.30))
-            SetRegion("b3",   BandPoly(spine, 0.066, 2.8, 1.25))
+            SetRegion("g1", PolyFromSpine(WhipSpine(t - 0.10, W, H)), f)
+            SetRegion("g2", PolyFromSpine(WhipSpine(t - 0.05, W, H)), f)
+            SetRegion("body", PolyFromSpine(spine), f)
+            SetRegion("hi",   PolyFromSpine(spine, 0.30, 0.45), f)
+            SetRegion("b1",   BandPoly(spine, 0.014, 3.2, 1.35), f)
+            SetRegion("b2",   BandPoly(spine, 0.038, 3.0, 1.25), f)
+            SetRegion("b3",   BandPoly(spine, 0.066, 2.8, 1.25), f)
 
             fade := 1.0
             if (f > FRAMES - 4)
@@ -387,10 +421,10 @@ Crack() {
             if (f = 16 || f = 17) {
                 tip := spine[spine.Length]
                 d   := 54
-                SetRegion("flash", Round(tip.x - d/2) "-" Round(tip.y - d/2) " W" d " H" d " E")
+                SetRegion("flash", Round(tip.x - d/2) "-" Round(tip.y - d/2) " W" d " H" d " E", f)
                 ShowWin("flash", 200)
                 for i, ang in [30, 75, 200, 250] {
-                    SetRegion("s" i, SparkPoly(tip.x, tip.y, ang, 92, 2.6))
+                    SetRegion("s" i, SparkPoly(tip.x, tip.y, ang, 92, 2.6), f)
                     ShowWin("s" i, 170)
                 }
             } else if (f = 18) {
@@ -399,7 +433,7 @@ Crack() {
                     HideWin("s" A_Index)
             }
 
-            Sleep(12)
+            Sleep(frameMs)
         }
     }
     finally {
@@ -433,10 +467,10 @@ BuildHud() {
 
     ; hairline border is a second window one pixel larger behind the panel -
     ; cheaper and more reliable than fighting control background colours.
-    HudEdge := Gui("-Caption +AlwaysOnTop +ToolWindow +E0x20 +Disabled -DPIScale")
+    HudEdge := Gui("-Caption +AlwaysOnTop +ToolWindow +E0x08000020 +Disabled -DPIScale")
     HudEdge.BackColor := "332C24"
 
-    Hud := Gui("-Caption +AlwaysOnTop +ToolWindow +E0x20 +Disabled -DPIScale")
+    Hud := Gui("-Caption +AlwaysOnTop +ToolWindow +E0x08000020 +Disabled -DPIScale")
     Hud.BackColor := "181410"
     Hud.MarginX := 0, Hud.MarginY := 0
 
@@ -509,8 +543,13 @@ PlayCrackSound() {
     if (FileExist(WavPath)) {
         try {
             SoundPlay(WavPath)
+            LogLine("sound: SoundPlay ok -> " WavPath)
             return
+        } catch as e {
+            LogLine("sound: SoundPlay THREW (" e.Message ") for " WavPath)
         }
+    } else {
+        LogLine("sound: file not found -> " WavPath)
     }
     SoundBeep(1100, 45)             ; fall back, keep working
     SoundBeep(1700, 35)
@@ -528,14 +567,13 @@ Fire(key, cmd, *) {
         return
 
     if (NeedsConfirm.Has(cmd)) {
-        last := ConfirmAt.Has(cmd) ? ConfirmAt[cmd] : 0
-        if (A_TickCount - last > 900) {
-            ConfirmAt[cmd] := A_TickCount
+        if (A_TickCount - ConfirmAt > 900) {
+            ConfirmAt := A_TickCount
             ToolTip(KeyLabel(key) " again to ship")
             SetTimer(() => ToolTip(), -900)
             return
         }
-        ConfirmAt[cmd] := 0
+        ConfirmAt := 0
     }
 
     try target := WinGetID("A")

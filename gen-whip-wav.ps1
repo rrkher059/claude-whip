@@ -36,12 +36,16 @@ for ($i = 0; $i -lt $total; $i++) {
     }
     else {
         # --- crack: the supersonic snap ---
-        $p    = ($i - $splitN) / [double]($total - $splitN)   # 0 -> 1 across the crack
-        $env  = [Math]::Exp(-34.0 * $p)
+        # p is SECONDS since the crack began, not normalised 0..1. With a
+        # normalised p the decay collapses to ~6ms (an inaudible tick) and the
+        # 190 term becomes 190 cycles per 0.21s = 905 Hz, i.e. a beep rather
+        # than body. In seconds: a 29ms decay and a true 190 Hz thump.
+        $p    = ($i - $splitN) / [double]$rate
+        $dec  = [Math]::Exp(-34.0 * $p)
         $k    = 0.59
         $lp   = $lp + ($k * ($noise - $lp))
         $body = 0.18 * [Math]::Sin(2.0 * [Math]::PI * 190.0 * $p) * [Math]::Exp(-60.0 * $p)
-        $v    = (($noise * 0.72) + ($lp * 0.28)) * $env + $body
+        $v    = (($noise * 0.72) + ($lp * 0.28)) * $dec + $body
     }
 
     if ($v -gt 1.0)  { $v = 1.0 }
