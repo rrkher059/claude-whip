@@ -6,6 +6,26 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/). Versions
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **The HUD disappeared and the hotkeys went inert the moment Claude Code started.** Detection matched on window title alone, and Claude Code rewrites the terminal title continuously while it works — the spinner, the current tool, the task name — so a `titles=` fragment that matched at the shell prompt stopped matching a second after you pressed Enter. The whip switched itself off exactly when you wanted it. A window now matches if its **process** is in the new `terminals=` list *or* its title matches `titles=`; the process name never moves. Existing configs get the default list without editing anything.
+- **`--doctor` and `--pick` killed the running whip.** `#SingleInstance Force` meant that asking a live instance to explain itself, or fixing its detection, took the instance away. Both now run alongside it; a normal launch still takes over, explicitly. `--doctor` reports whether a whip is resident and its pid.
+- **`--doctor` printed nothing when run from a terminal.** AutoHotkey is a GUI-subsystem app with no console attached, so the report went nowhere. It now borrows the calling terminal's console, and still honours a redirect when you pipe it.
+
+### Added
+
+- `terminals=` — comma-separated process names, defaulting to `WindowsTerminal.exe,powershell.exe,pwsh.exe,cmd.exe,wezterm-gui.exe,alacritty.exe`. Empty switches process matching off; emptying both it and `titles=` falls back to `titles=claude` rather than leaving the whip inert everywhere.
+- `--doctor`'s detection section reports the focused window's process, its title, and which rule matched.
+- A running whip watches `config.ini` and reloads within a few seconds, so a hand edit — or a standalone `--pick` from another window — takes effect without a restart.
+
+### Changed
+
+- `--pick` lists each window's process next to its title and saves the **process name** into `terminals=`, seeded with the current list and editable before saving. Saving a title was saving the one thing guaranteed to change.
+
+---
+
 ## [2.0.0] — 2026-09-21
 
 The version where the whip actually renders, the sound is a crack rather than a beep, and the thing is usable by someone who is not its author.

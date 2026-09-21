@@ -66,8 +66,10 @@ If the diff is empty, the skill is told to say so and stop rather than inventing
 ```ini
 [whip]
 sound=              ; custom wav; blank uses whip.wav next to the script
+terminals=WindowsTerminal.exe,powershell.exe,pwsh.exe,cmd.exe,wezterm-gui.exe,alacritty.exe
+                    ; comma-separated process names; the primary detection rule
 titles=claude       ; comma-separated fragments matched against the window title
-debug=0             ; 1 logs every non-matching window title to whip.log
+debug=0             ; 1 logs every non-matching window to whip.log
 hud=1               ; the corner tab and its expanding binding list
 volume=1            ; 0 mutes
 animate=1           ; 0 skips the visuals and just sends the command
@@ -83,6 +85,16 @@ F1=whip
 ```
 
 Behaviour follows the **command**, not the key: `ship` always double-taps and `decide` / `debt` / `why` always prompt for arguments, wherever you bind them. Remapping keeps safety.
+
+### How a Claude Code window is recognised
+
+A window counts if **either** its process is in `terminals=` **or** its title contains a `titles=` fragment.
+
+Process comes first because it is the only stable signal. Claude Code rewrites the terminal title continuously while it works — the spinner, the current tool, the task name — so a `titles=` fragment that matched at the shell prompt stops matching a second after you press Enter, and the HUD vanishes exactly when you want it. The process name never moves.
+
+`titles=` is still there for anything `terminals=` cannot cover: a terminal nobody has heard of, a web IDE in a browser tab, an editor's integrated panel. Emptying either key switches that rule off; emptying both falls back to `titles=claude` rather than leaving the whip inert everywhere.
+
+Editing `config.ini` takes effect within a few seconds — a running whip watches the file and reloads itself.
 
 Tray menu: reload config, open config, open log, show stats, pick Claude window, show welcome, toggle HUD, pause hotkeys, exit.
 
@@ -144,15 +156,17 @@ The palette defaults to `Ctrl+Alt+P`. On international layouts AltGr sends Ctrl+
 .\whip.ahk --doctor
 ```
 
-It prints your AutoHotkey version and path, display scaling, the wav's parsed header and measured peak amplitude, which of the sixteen skills are on disk, your current `titles=` and whether the focused window actually matches it, whether `config.ini` carries a UTF-8 BOM, and the last five errors — then a verdict. Paste that into an issue.
+It prints your AutoHotkey version and path, display scaling, whether a whip is already resident, the wav's parsed header and measured peak amplitude, which of the sixteen skills are on disk, your `terminals=` and `titles=` with the focused window's process and title and **which rule matched**, whether `config.ini` carries a UTF-8 BOM, and the last five errors — then a verdict. Paste that into an issue.
 
-**The hotkeys do nothing.** Almost always title detection. Every hotkey is scoped so `F1` stays `F1` everywhere else; if your terminal doesn't put "claude" in its title, nothing fires. Fix it without touching a config file:
+`--doctor` and `--pick` run alongside a whip that is already going and leave it untouched, so diagnosing a live instance never costs you the instance.
+
+**The hotkeys do nothing.** Detection. Every hotkey is scoped so `F1` stays `F1` everywhere else; if your terminal is not in `terminals=` and its title never matches `titles=`, nothing fires. Fix it without touching a config file:
 
 ```powershell
 .\whip.ahk --pick
 ```
 
-Pick your window from the list, trim the text to the part that never changes, save. It writes `titles=` for you. The tool also offers this by itself if a terminal stays focused for a minute without ever matching.
+Pick your window from the list — it shows each window's process alongside its title — and its process name is added to `terminals=`. The running whip picks the change up on its own. The tool also offers this by itself if a terminal stays focused for a minute without ever matching.
 
 **Nothing takes effect when I edit config.ini.** Check `--doctor` for `utf-8 bom`. Windows' INI functions do not skip a BOM, so an editor that adds one makes *every* setting silently fall back to its default. The tool strips it at startup, but that is the classic cause.
 

@@ -1,5 +1,11 @@
 #Requires AutoHotkey v2.0
-#SingleInstance Force
+
+; "Force" would be simpler, but it makes every launch kill whatever is already
+; running - including `whip.ahk --doctor`, whose whole job is to report on the
+; live instance, and `--pick`, which exists to fix a broken one. With Off, the
+; direct-call flags run alongside the resident whip and the normal launch takes
+; over explicitly via ReplaceResident().
+#SingleInstance Off
 
 ; Regions are computed and applied to the overlays while they are still
 ; hidden, so the first frame appears already shaped instead of flashing a
@@ -33,9 +39,17 @@ StatsPath := A_ScriptDir "\stats.csv"
 WHIP_VERSION := "2.0.0"
 WHIP_REPO    := "rrkher059/claude-whip"
 
+; The terminals whose *process* counts as a Claude Code window regardless of
+; what the title currently says. See ActiveIsClaude() for why this exists.
+DEFAULT_TERMINALS := "WindowsTerminal.exe,powershell.exe,pwsh.exe,cmd.exe,wezterm-gui.exe,alacritty.exe"
+
 ; Everything at script scope is already global in v2.
 Cfg        := Map()
 Titles     := []
+Terminals  := []
+CfgStamp   := ""
+Standalone := false
+ConOut     := ""
 Keys       := []
 Animating  := false
 Paused     := false
@@ -77,7 +91,7 @@ NagWin        := ""
 PickWin       := ""
 PickList      := ""
 PickEdit      := ""
-PickTitles    := []
+PickProcs     := []
 PalWin        := ""
 PalEdit       := ""
 PalList       := ""
@@ -135,11 +149,26 @@ HotIfFn := (*) => IsClaude()
 FirstRun := !FileExist(IniPath)
 LoadCfg()
 LoadDescs()
-; --doctor prints a health report to stdout and exits. It runs before any
-; window is created, so it is safe to pipe.
+
+; --- direct-call flags -------------------------------------------------
+; These do one thing and exit, and they run *alongside* a resident whip
+; rather than replacing it. Reporting on a live instance, or fixing its
+; detection, is useless if invoking it is what takes the HUD away.
 for arg in A_Args {
     if (arg = "--doctor") {
+        Standalone := true
+        EnsureConsole()
         Doctor()
+        ExitApp()
+    }
+    if (arg = "--pick") {
+        Standalone := true
+        EnsureConsole()
+        ShowPicker()
+        ; GUI callbacks run during Sleep, so this is the message pump. The
+        ; resident instance picks the new terminals= up via WatchCfg().
+        while (IsObject(PickWin))
+            Sleep(100)
         ExitApp()
     }
 }
@@ -147,9 +176,11 @@ for arg in A_Args {
 BuildOverlays()
 
 ; --test: one slow, loud crack on demand, then quit. No hotkeys, no HUD, so
-; it can be verified without switching windows or focusing Claude.
+; it can be verified without switching windows or focusing Claude. Like the
+; other direct-call flags it leaves a resident whip running.
 for i, arg in A_Args {
     if (arg = "--test") {
+        Standalone := true
         ; --test [speed]   speed 1 = real time, default 12 = slow enough to watch
         spd := (A_Args.Has(i + 1) && IsNumber(A_Args[i + 1])) ? A_Args[i + 1] + 0 : 12
         Cfg["debug"] := 1
@@ -164,19 +195,21 @@ for i, arg in A_Args {
     }
 }
 
+; Past this point we are the resident whip, so take over from any older one.
+ReplaceResident()
+
 BuildHud()
 BindKeys()
 BuildTray()
 SetTimer(UpdateHud, 150)
 SetTimer(DetectTick, 2000)
+SetTimer(WatchCfg, 3000)
 SetTimer(CheckUpdate, -6000)      ; once, well after startup; never blocks
 
 wantWelcome := FirstRun
 for arg in A_Args {
     if (arg = "--welcome")
         wantWelcome := true
-    if (arg = "--pick")
-        SetTimer(ShowPicker, -300)
     ; calls ShowPalette directly, so the palette can be exercised without
     ; depending on a synthetic keystroke reaching the hook
     if (arg = "--palette")
@@ -191,9 +224,10 @@ if (wantWelcome)
 ; config
 ; ---------------------------------------------------------------------------
 WriteDefaultCfg() {
-    global IniPath, DEFAULT_KEYS
+    global IniPath, DEFAULT_KEYS, DEFAULT_TERMINALS
     IniWrite("",       IniPath, "whip", "sound")
     IniWrite("claude", IniPath, "whip", "titles")
+    IniWrite(DEFAULT_TERMINALS, IniPath, "whip", "terminals")
     IniWrite("0",      IniPath, "whip", "debug")
     IniWrite("1",      IniPath, "whip", "hud")
     IniWrite("1",      IniPath, "whip", "volume")
@@ -236,7 +270,7 @@ StripBom(path) {
 }
 
 LoadCfg() {
-    global Cfg, Titles, Keys, IniPath, WavPath, DEFAULT_KEYS
+    global Cfg, Titles, Terminals, Keys, IniPath, WavPath, DEFAULT_KEYS, DEFAULT_TERMINALS
     if (!FileExist(IniPath))
         WriteDefaultCfg()
     StripBom(IniPath)
@@ -244,6 +278,9 @@ LoadCfg() {
     Cfg := Map()
     Cfg["sound"]   := Trim(IniRead(IniPath, "whip", "sound", ""))
     Cfg["titles"]  := Trim(IniRead(IniPath, "whip", "titles", "claude"))
+    ; Absent key -> the default list. Present but empty -> genuinely empty,
+    ; which is how you turn process matching off on purpose.
+    Cfg["terminals"] := Trim(IniRead(IniPath, "whip", "terminals", DEFAULT_TERMINALS))
     Cfg["debug"]   := IniRead(IniPath, "whip", "debug",   "0") + 0
     Cfg["hud"]     := IniRead(IniPath, "whip", "hud",     "1") + 0
     Cfg["volume"]  := IniRead(IniPath, "whip", "volume",  "1") + 0
@@ -285,7 +322,15 @@ LoadCfg() {
         if (f != "")
             Titles.Push(f)
     }
-    if (Titles.Length = 0)
+    Terminals := []
+    for frag in StrSplit(Cfg["terminals"], ",") {
+        f := Trim(frag)
+        if (f != "")
+            Terminals.Push(f)
+    }
+    ; Emptying one list is a choice; emptying both leaves the whip inert
+    ; everywhere, which is never what anyone meant.
+    if (Titles.Length = 0 && Terminals.Length = 0)
         Titles.Push("claude")
 
     global ArgHist
@@ -320,10 +365,37 @@ LoadCfg() {
 }
 
 ReloadCfg(*) {
+    global IniPath, CfgStamp
     LoadCfg()
     BuildHud()
     BindKeys()
+    try CfgStamp := FileGetTime(IniPath, "M")
     Notify("config reloaded")
+}
+
+; Every write we make to config.ini goes through here, so WatchCfg() can tell
+; our own writes apart from somebody else's and not reload on each one.
+IniPut(val, section, key) {
+    global IniPath, CfgStamp
+    IniWrite(val, IniPath, section, key)
+    try CfgStamp := FileGetTime(IniPath, "M")
+}
+
+; Picks up config.ini changing underneath us - a hand edit, or a standalone
+; `whip.ahk --pick` that just saved terminals= from another process. Without
+; this, --pick would only take effect on the next restart, which is exactly
+; the restart we stopped forcing.
+WatchCfg(*) {
+    global IniPath, CfgStamp
+    try stamp := FileGetTime(IniPath, "M")
+    catch
+        return
+    if (CfgStamp = "") {
+        CfgStamp := stamp
+        return
+    }
+    if (stamp != CfgStamp)
+        ReloadCfg()
 }
 
 ; ---------------------------------------------------------------------------
@@ -340,6 +412,17 @@ MatchTitle(title) {
     return false
 }
 
+MatchProc(name) {
+    global Terminals
+    if (name = "")
+        return false
+    for p in Terminals {
+        if (p = name)                    ; "=" is case-insensitive in v2
+            return true
+    }
+    return false
+}
+
 ; Used as the #HotIf criterion for every binding, so F1-F6 and Shift+F1-F6
 ; behave completely normally in every other application.
 ; Our own dialogs are titled "claude whip", which matches the default
@@ -350,20 +433,42 @@ ActiveIsOurs() {
     return false
 }
 
+; Why this is not just a title check.
+;
+; Claude Code rewrites the terminal title continuously while it works - the
+; spinner, the current tool, a token counter - so a titles= fragment that
+; matched at the shell prompt stops matching a second after you press Enter.
+; The symptom is the HUD disappearing the moment Claude Code starts and the
+; hotkeys going inert exactly when you want them. Title matching cannot be
+; made reliable; the window's *process* never changes.
+;
+; So: a known terminal binary is a match on its own, and titles= still works
+; on top of it for anything not in terminals= (a browser tab, an editor, a
+; terminal nobody has heard of).
+;
+; Returns "" for no match, otherwise the rule that matched - Doctor() and the
+; debug log both want to say which one it was.
+ActiveIsClaude() {
+    if (ActiveIsOurs())
+        return ""
+    proc := "", title := ""
+    try proc  := WinGetProcessName("A")
+    try title := WinGetTitle("A")
+    if (proc = "" && title = "")
+        return ""
+    if (MatchProc(proc))
+        return "process " proc
+    if (MatchTitle(title))
+        return "title " title
+    LogMiss(title " [" proc "]")
+    return ""
+}
+
 IsClaude() {
     global Paused
     if (Paused)
         return false
-    if (ActiveIsOurs())
-        return false
-    try
-        title := WinGetTitle("A")
-    catch
-        return false
-    if (MatchTitle(title))
-        return true
-    LogMiss(title)
-    return false
+    return ActiveIsClaude() != ""
 }
 
 LogLine(text) {
@@ -974,13 +1079,12 @@ UpdateHud(*) {
         return
     }
     try {
-        hwnd  := WinGetID("A")
-        title := WinGetTitle("A")
+        hwnd := WinGetID("A")
     } catch {
         HideHud()
         return
     }
-    if (ActiveIsOurs() || !MatchTitle(title)) {
+    if (ActiveIsClaude() = "") {
         HideHud()
         return
     }
@@ -1090,7 +1194,7 @@ DragHud() {
     midX := rect.x + rect.w / 2, midY := rect.y + rect.h / 2
     corner := ((fy + HUD_TAB_H / 2) < midY ? "t" : "b") . ((fx + HUD_TAB_W / 2) < midX ? "l" : "r")
     Cfg["hudcorner"] := corner
-    IniWrite(corner, IniPath, "whip", "hudcorner")
+    IniPut(corner, "whip", "hudcorner")
     HudDragging := false
     Toast("HUD -> " corner)
 }
@@ -1310,7 +1414,7 @@ ArgSubmit() {
         while (ArgHist.Length > 5)
             ArgHist.Pop()
         Loop 5
-            IniWrite(ArgHist.Has(A_Index) ? ArgHist[A_Index] : "", IniPath, "history", "h" A_Index)
+            IniPut(ArgHist.Has(A_Index) ? ArgHist[A_Index] : "", "history", "h" A_Index)
     }
     ArgDone := true
 }
@@ -1541,19 +1645,13 @@ IsTerminalProc(name) {
 }
 
 DetectTick(*) {
-    global Cfg, NoMatchMs, DetectNagged
+    global NoMatchMs, DetectNagged
     if (DetectNagged)
         return
-    if (Cfg["titles"] != "claude") {        ; already configured; nothing to nag about
-        SetTimer(DetectTick, 0)
+    try proc := WinGetProcessName("A")
+    catch
         return
-    }
-    try {
-        title := WinGetTitle("A")
-        proc  := ProcessGetName(WinGetPID("A"))
-    } catch
-        return
-    if (MatchTitle(title)) {                ; detection works, stop watching
+    if (ActiveIsClaude() != "") {           ; detection works, stop watching
         SetTimer(DetectTick, 0)
         return
     }
@@ -1578,9 +1676,9 @@ ShowDetectNag() {
     NagWin.Add("Text", "cC9A227", "claude whip can't find your Claude Code window")
     NagWin.SetFont("s9 Norm", "Consolas")
     NagWin.Add("Text", "c8A7F72 w460"
-        , "Your terminal has been focused for a while and its title never matched "
-          "titles=claude, so the hotkeys stay inert there. Pick the right window and "
-          "it will be remembered.")
+        , "Your terminal has been focused for a while, and it is neither in terminals= "
+          "nor matched by titles=, so the hotkeys stay inert there. Pick it below and "
+          "its process name gets added to terminals= for good.")
     b := NagWin.Add("Button", "w150", "Pick window")
     b.OnEvent("Click", (*) => (CloseNag(), ShowPicker()))
     b2 := NagWin.Add("Button", "x+10 yp w110", "Ignore")
@@ -1596,8 +1694,11 @@ CloseNag() {
     NagWin := ""
 }
 
+; The picker saves the *process name*, not the title - a title picked here
+; would stop matching the moment Claude Code started rewriting it, which is
+; the bug this whole path exists to work around.
 ShowPicker(*) {
-    global PickWin, PickList, PickEdit, PickTitles
+    global PickWin, PickList, PickEdit, PickProcs, Cfg
 
     if (IsObject(PickWin))
         try PickWin.Destroy()
@@ -1608,17 +1709,19 @@ ShowPicker(*) {
     ids := WinGetList()
     DetectHiddenWindows(true)
 
-    PickTitles := [], items := []
+    PickProcs := [], items := []
     for hwnd in ids {
-        try t := WinGetTitle(hwnd)
-        catch
+        try {
+            t := WinGetTitle(hwnd)
+            p := WinGetProcessName(hwnd)
+        } catch
             continue
         if (Trim(t) = "" || StrLen(t) < 3)
             continue
         if (InStr(t, "claude whip"))
             continue
-        PickTitles.Push(t)
-        items.Push(t)
+        PickProcs.Push(p)
+        items.Push(Format("{:-24}", p) . t)
     }
 
     PickWin := Gui("+AlwaysOnTop -MaximizeBox", "claude whip - pick your Claude Code window")
@@ -1626,13 +1729,14 @@ ShowPicker(*) {
     PickWin.MarginX := 14, PickWin.MarginY := 12
     PickWin.SetFont("s9 Norm", "Consolas")
     PickWin.Add("Text", "cBFB3A4 w620"
-        , "Pick the window you run Claude Code in. The text below is what gets matched`n"
-          "against window titles - trim it to the part that never changes.")
+        , "Pick the window you run Claude Code in. Its process name gets added to the`n"
+          "list below - process, not title, because Claude Code rewrites the title as`n"
+          "it works. Edit the list freely; it is saved verbatim as terminals=.")
     PickList := PickWin.Add("ListBox", "w620 r12 Background181410 cBFB3A4")
     if (items.Length)
         PickList.Add(items)
     PickList.OnEvent("Change", (*) => PickSel())
-    PickEdit := PickWin.Add("Edit", "w620 Background201A14 cE8DCC8")
+    PickEdit := PickWin.Add("Edit", "w620 Background201A14 cE8DCC8", Cfg["terminals"])
     b := PickWin.Add("Button", "w120 Default", "Save")
     b.OnEvent("Click", (*) => PickSave())
     b2 := PickWin.Add("Button", "x+10 yp w120", "Cancel")
@@ -1643,23 +1747,36 @@ ShowPicker(*) {
 }
 
 PickSel() {
-    global PickList, PickEdit, PickTitles
+    global PickList, PickEdit, PickProcs
     i := PickList.Value
-    if (i && PickTitles.Has(i))
-        PickEdit.Value := PickTitles[i]
+    if (!i || !PickProcs.Has(i))
+        return
+    proc := PickProcs[i]
+    cur  := Trim(PickEdit.Value)
+    for frag in StrSplit(cur, ",") {
+        if (Trim(frag) = proc)              ; already covered, leave the list alone
+            return
+    }
+    PickEdit.Value := (cur = "") ? proc : cur "," proc
 }
 
 PickSave() {
-    global PickEdit, IniPath
-    frag := Trim(PickEdit.Value)
-    if (frag = "") {
+    global PickEdit, IniPath, Standalone
+    list := Trim(PickEdit.Value)
+    if (list = "") {
         Notify("nothing selected")
         return
     }
-    IniWrite(frag, IniPath, "whip", "titles")
+    IniPut(list, "whip", "terminals")
     PickClose()
+    ; Standalone --pick has no HUD or hotkeys to rebuild, and the resident
+    ; instance reloads itself when it sees config.ini change.
+    if (Standalone) {
+        Say("terminals set to: " list)
+        return
+    }
     ReloadCfg()
-    Notify("titles set to: " frag)
+    Notify("terminals set to: " list)
 }
 
 PickClose() {
@@ -1709,13 +1826,81 @@ BindKeys() {
     }
     HotIf()
 
-    LogLine("bound " ok "/" Keys.Length " hotkeys; titles=" Cfg["titles"] (bad != "" ? "; FAILED: " bad : ""))
+    LogLine("bound " ok "/" Keys.Length " hotkeys; terminals=" Cfg["terminals"]
+          . "; titles=" Cfg["titles"] (bad != "" ? "; FAILED: " bad : ""))
+}
+
+; ---------------------------------------------------------------------------
+; instances and console
+; ---------------------------------------------------------------------------
+; What #SingleInstance Force used to do, but only on the path that actually
+; means it. Every AHK script owns a hidden main window of class AutoHotkey
+; whose title starts with the script's full path, which is enough to find our
+; older selves without touching other people's scripts.
+; PID of another instance of this same script, or 0.
+ResidentPid() {
+    me := DllCall("GetCurrentProcessId", "UInt")
+    for hwnd in WinGetList("ahk_class AutoHotkey") {
+        try {
+            pid := WinGetPID(hwnd)
+            if (pid != me && InStr(WinGetTitle(hwnd), A_ScriptFullPath))
+                return pid
+        }
+    }
+    return 0
+}
+
+ReplaceResident() {
+    me    := DllCall("GetCurrentProcessId", "UInt")
+    found := 0
+    for hwnd in WinGetList("ahk_class AutoHotkey") {
+        try {
+            if (WinGetPID(hwnd) = me)
+                continue
+            if (!InStr(WinGetTitle(hwnd), A_ScriptFullPath))
+                continue
+            PostMessage(0x111, 65405, , , hwnd)   ; WM_COMMAND, ID_FILE_EXIT
+            found += 1
+        }
+    }
+    if (!found)
+        return
+    ; Give the old instance a moment to drop its hotkeys and overlays, or the
+    ; two briefly fight over the same bindings.
+    Loop 20 {
+        Sleep(50)
+        if (!ResidentPid())
+            break
+    }
+}
+
+; AHK is a GUI-subsystem app, so it starts with no console and FileAppend to
+; "*" goes nowhere - which is why --doctor used to look like it printed
+; nothing. Borrow the calling terminal's console if there is one.
+; If stdout is already a pipe or a file, leave it alone: a redirected
+; --doctor must keep going to the redirect.
+EnsureConsole() {
+    global ConOut
+    h := DllCall("GetStdHandle", "Int", -11, "Ptr")
+    if (h && h != -1)
+        return
+    if (!DllCall("AttachConsole", "UInt", 0xFFFFFFFF))
+        DllCall("AllocConsole")
+    try ConOut := FileOpen("CONOUT$", "w")
 }
 
 ; ---------------------------------------------------------------------------
 ; --doctor
 ; ---------------------------------------------------------------------------
 Say(t := "") {
+    global ConOut
+    if (IsObject(ConOut)) {
+        try {
+            ConOut.Write(t "`n")
+            ConOut.Read(0)              ; flush
+            return
+        }
+    }
     try FileAppend(t "`n", "*", "UTF-8")
 }
 
@@ -1737,6 +1922,9 @@ Doctor() {
     Say("  script       : " A_ScriptFullPath)
     Say("  screen       : " A_ScreenWidth "x" A_ScreenHeight " @ " A_ScreenDPI " dpi"
         . (A_ScreenDPI = 96 ? " (100% scaling)" : " (scaled - report this if the whip looks wrong)"))
+    pid := ResidentPid()
+    Say("  resident whip: " (pid ? "running, pid " pid " (this report did not disturb it)"
+                                 : "not running - start whip.ahk with no flags"))
     Say()
 
     ; --- sound ------------------------------------------------------------
@@ -1808,21 +1996,21 @@ Doctor() {
 
     ; --- detection --------------------------------------------------------
     Say("detection")
-    Say("  titles=      : " Cfg["titles"])
-    try {
-        t := WinGetTitle("A")
-        Say("  active window: " (t = "" ? "(none)" : t))
-        if (ActiveIsOurs())
-            Say("  matches      : n/a (that window belongs to claude-whip itself)")
-        else if (MatchTitle(t))
-            Say("  matches      : YES - hotkeys are live there")
-        else {
-            problems += 1
-            Say("  matches      : NO - hotkeys stay inert in that window")
-            Say("  fix          : run with --pick, or set titles= to part of the real title")
-        }
-    } catch {
-        Say("  active window: (could not read)")
+    Say("  terminals=   : " (Cfg["terminals"] = "" ? "(empty - process matching off)" : Cfg["terminals"]))
+    Say("  titles=      : " (Cfg["titles"] = "" ? "(empty - title matching off)" : Cfg["titles"]))
+    t := "", p := ""
+    try t := WinGetTitle("A")
+    try p := WinGetProcessName("A")
+    Say("  active window: " (t = "" ? "(none)" : t))
+    Say("  active proc  : " (p = "" ? "(unknown)" : p))
+    if (ActiveIsOurs())
+        Say("  matches      : n/a (that window belongs to claude-whip itself)")
+    else if (rule := ActiveIsClaude())
+        Say("  matches      : YES by " rule " - hotkeys are live there")
+    else {
+        problems += 1
+        Say("  matches      : NO - hotkeys stay inert in that window")
+        Say("  fix          : run with --pick to add " (p = "" ? "its process" : p) " to terminals=")
     }
     Say()
 
@@ -1889,24 +2077,6 @@ Doctor() {
 ; counter both defeat. A chain step that silently guessed wrong would fire
 ; the next command into a half-finished answer, so the token is rejected
 ; loudly instead.
-ChainWait(ms) {
-    global ChainAbort
-    waited := 0
-    while (waited < ms) {
-        if (ChainAbort || GetKeyState("Escape", "P")) {
-            ChainAbort := true
-            Toast("chain cancelled", 1200)
-            return false
-        }
-        left := Ceil((ms - waited) / 1000)
-        if (Mod(waited, 1000) = 0)
-            Toast("chain: waiting " left "s  (Esc cancels)", 1200)
-        Sleep(100)
-        waited += 100
-    }
-    return true
-}
-
 FireChain(key, spec) {
     global ChainAbort
     steps := []
@@ -1923,8 +2093,18 @@ FireChain(key, spec) {
         if (ChainAbort)
             return
         if (RegExMatch(st, "i)^wait[ \t]+([0-9]+)$", &m)) {
-            if (!ChainWait(Integer(m[1]) * 1000))
-                return
+            ms := Integer(m[1]) * 1000, waited := 0
+            while (waited < ms) {
+                if (ChainAbort || GetKeyState("Escape", "P")) {
+                    ChainAbort := true
+                    Toast("chain cancelled", 1200)
+                    return
+                }
+                if (Mod(waited, 1000) = 0)
+                    Toast("chain: waiting " Ceil((ms - waited) / 1000) "s  (Esc cancels)", 1200)
+                Sleep(100)
+                waited += 100
+            }
         } else if (RegExMatch(st, "i)^wait-idle\b")) {
             LogLine("chain: 'wait-idle' is not supported (no reliable idle signal); chain stopped")
             Toast("wait-idle unsupported - chain stopped", 2600)
@@ -1948,11 +2128,6 @@ FireChain(key, spec) {
 ; window belongs to the terminal host rather than the shell inside it, and
 ; with tabs there is no reliable way to know which shell is in front, so a
 ; "cwd" column would be whip's own directory dressed up as yours.
-CsvEscape(t) {
-    t := StrReplace(t, "`"", "`"`"")
-    return "`"" t "`""
-}
-
 RecordFire(cmd, hwnd) {
     global StatsPath
     try {
@@ -1962,7 +2137,8 @@ RecordFire(cmd, hwnd) {
     try {
         if (!FileExist(StatsPath))
             FileAppend("timestamp,command,window`n", StatsPath, "UTF-8")
-        FileAppend(FormatTime(A_Now, "yyyy-MM-dd HH:mm:ss") "," cmd "," CsvEscape(title) "`n"
+        title := StrReplace(title, "`"", "`"`"")
+        FileAppend(FormatTime(A_Now, "yyyy-MM-dd HH:mm:ss") "," cmd ",`"" title "`"`n"
                  , StatsPath, "UTF-8")
     }
 }
@@ -2080,25 +2256,12 @@ ShowStats(*) {
 ; ---------------------------------------------------------------------------
 ; update check - once a day, never blocking, never automatic
 ; ---------------------------------------------------------------------------
-VersionNewer(a, b) {          ; is a newer than b, both like 2.0.0
-    pa := StrSplit(StrReplace(a, "v", ""), "."), pb := StrSplit(StrReplace(b, "v", ""), ".")
-    Loop 3 {
-        x := pa.Has(A_Index) ? Integer(pa[A_Index]) : 0
-        y := pb.Has(A_Index) ? Integer(pb[A_Index]) : 0
-        if (x > y)
-            return true
-        if (x < y)
-            return false
-    }
-    return false
-}
-
 CheckUpdate(*) {
     global IniPath, WHIP_VERSION, WHIP_REPO
     today := FormatTime(A_Now, "yyyy-MM-dd")
     if (Trim(IniRead(IniPath, "whip", "lastcheck", "")) = today)
         return
-    try IniWrite(today, IniPath, "whip", "lastcheck")
+    try IniPut(today, "whip", "lastcheck")
     try {
         req := ComObject("WinHttp.WinHttpRequest.5.1")
         req.SetTimeouts(3000, 3000, 3000, 4000)
@@ -2111,7 +2274,18 @@ CheckUpdate(*) {
         if (!RegExMatch(req.ResponseText, '"tag_name"\s*:\s*"([^"]+)"', &m))
             return
         latest := m[1]
-        if (VersionNewer(latest, WHIP_VERSION)) {
+        pa := StrSplit(StrReplace(latest, "v", ""), ".")
+        pb := StrSplit(StrReplace(WHIP_VERSION, "v", ""), ".")
+        newer := false
+        Loop 3 {
+            x := pa.Has(A_Index) ? Integer(pa[A_Index]) : 0
+            y := pb.Has(A_Index) ? Integer(pb[A_Index]) : 0
+            if (x != y) {
+                newer := x > y
+                break
+            }
+        }
+        if (newer) {
             LogLine("update available: " latest " (running " WHIP_VERSION ")")
             TrayTip("claude whip " latest " is available"
                   , "You are running " WHIP_VERSION ". github.com/" WHIP_REPO "/releases")
@@ -2164,7 +2338,7 @@ OpenLog(*) {
 ToggleHud(*) {
     global Cfg, IniPath
     Cfg["hud"] := Cfg["hud"] ? 0 : 1
-    IniWrite(Cfg["hud"], IniPath, "whip", "hud")
+    IniPut(Cfg["hud"], "whip", "hud")
     if (!Cfg["hud"])
         HideHud()
     Notify("HUD " (Cfg["hud"] ? "on" : "off"))
