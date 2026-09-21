@@ -1,10 +1,20 @@
 # claude-whip
 
-Sixteen hotkeys that fire pre-written, high-leverage slash commands into Claude Code running in a terminal. Each press plays a synthesized whip crack and draws a photoreal leather bullwhip lashing across the entire screen.
+Sixteen hotkeys that fire pre-written, high-leverage prompts into Claude Code. Each press plays a synthesized whip crack and lashes a leather bullwhip across your terminal.
 
-**It does not make the model think faster. Nothing can.** There is no prompt, no hotkey, and no tool that changes how quickly Claude reasons. What this does is make the prompts you never bother typing cost one keystroke.
+![the whip cracking across a terminal](docs/whip.gif)
+
+**It does not make the model think faster. Nothing can.** There is no prompt, no hotkey and no tool that changes how quickly Claude reasons. What this does is make the prompts you never bother typing cost one keystroke.
 
 That is the whole pitch. The prompts in this repo are ones most people know they *should* send — a hostile pre-merge review, a scaling and cost check, a decision record, a handoff note — and don't, because typing three hundred words of careful instruction at the moment you are tired and almost done is a tax nobody pays. Binding them to a function key removes the tax. The whip is there so it feels like something happened.
+
+```powershell
+git clone https://github.com/rrkher059/claude-whip
+cd claude-whip
+.\install.ps1
+```
+
+That installs dependencies, copies the skills, generates the sound, adds a Startup shortcut, starts the tool and runs a health check. It is safe to run again.
 
 ---
 
@@ -12,28 +22,32 @@ That is the whole pitch. The prompts in this repo are ones most people know they
 
 | Key | Command | What it actually buys you |
 |---|---|---|
-| `F1` | `/whip` | Hard stop on overbuilding. Sets standing rules — smallest change, no new files, no one-caller helpers, no speculative error handling — and deletes any excess already written. The single most useful key here. |
+| `F1` | `/whip` | Hard stop on overbuilding. Sets standing rules — smallest change, no new files, no one-caller helpers, no speculative error handling — and deletes any excess already written. The most useful key here. |
 | `F2` | `/redteam` | Hostile senior-engineer review of the **live working tree**, grounded in a real `git diff`. Three sections: what breaks in production, security, the one thing to fix first. No praise. |
-| `F3` | `/ship` | Detects your test and lint commands, runs them, and commits + pushes **only if they pass**. On failure it stops and shows you the output without "helpfully" fixing anything. Double-tap to confirm. |
-| `F4` | `/decide` | Appends a dated entry to `DECISIONS.md` — decision, why, what you rejected, and the signal that should reopen it. Prompts for a title. Six months from now this is the only record of why. |
-| `F5` | `/scale` | This code at 100x traffic: what breaks first and at what load, estimated cost per 1,000 users with assumptions stated, and the cheapest fix that buys the most headroom. |
-| `F6` | `/unstuck` | Circuit breaker for debugging loops. Writes no code. Forces out the assumption you have both been treating as true without checking — which is usually the bug — then picks a five-minute experiment. |
-| `Shift+F1` | `/orient` | Dropping into an unfamiliar or forgotten repo. What it does, the five files that matter, how data flows end to end, the one piece of architecture you will otherwise trip over, and what the last fifteen commits say you were mid-way through. |
-| `Shift+F2` | `/secure` | Full-repo security sweep, not just the diff. Secrets, missing authorization, injection, CORS wildcards, missing rate limiting, PII in logs — ordered by what gets exploited first. |
-| `Shift+F3` | `/test` | Writes the one regression test that would have caught the bug you just fixed, matching your existing conventions, then runs it. Must fail against the old behavior or it isn't a regression test. |
-| `Shift+F4` | `/debt` | The three worst things in the repo ranked by **six-month cost, not ugliness**, with fix-now vs fix-later estimates. "Leave it" is an allowed and frequently correct verdict. Prompts for optional focus. |
-| `Shift+F5` | `/user` | Walks your actual entry path as a first-time user. Where confusion starts, every step between arriving and value, what breaks on mobile / with no data / with a typo, and the one change that moves activation. |
-| `Shift+F6` | `/handoff` | Overwrites `HANDOFF.md` so a zero-context session resumes exactly where you stopped: state, literal next action, traps, open questions. |
-| `Ctrl+F1` | `/cost` | Finds every paid model call in the repo and estimates the monthly bill at stated usage, naming the single call path responsible for most of it. |
-| `Ctrl+F2` | `/why` | Takes a file or function, runs `git log -p --follow` on it, and explains why the code is that way from its real history — including the scar tissue and what was already tried and reverted. Prompts for the target. |
-| `Ctrl+F3` | `/simplify` | The three functions with the worst complexity-to-value ratio, each with the actual diff it could become and proof the complexity isn't earning its keep. |
-| `Ctrl+F4` | `/onboard` | Generates `CONTRIBUTING.md` from what the repo actually does — setup commands verified against lockfiles and CI, not boilerplate. |
+| `F3` | `/ship` | Detects your test and lint commands, runs them, and commits + pushes **only if they pass**. On failure it stops and shows the output without "helpfully" fixing anything. Double-tap to confirm. |
+| `F4` | `/decide` | Appends a dated entry to `DECISIONS.md` — decision, why, what you rejected, and the signal that should reopen it. Six months from now this is the only record of why. |
+| `F5` | `/scale` | This code at 100x traffic: what breaks first and at what load, cost per 1,000 users with assumptions stated, and the cheapest fix that buys the most headroom. |
+| `F6` | `/unstuck` | Circuit breaker for debugging loops. Writes no code. Forces out the assumption you have both been treating as true without checking — usually the bug — then picks a five-minute experiment. |
+| `Shift+F1` | `/orient` | Unfamiliar or forgotten repo. What it does, the five files that matter, how data flows end to end, the one piece of architecture you will otherwise trip over. |
+| `Shift+F2` | `/secure` | Full-repo security sweep. Secrets, missing authorization, injection, CORS wildcards, missing rate limiting, PII in logs — ordered by what gets exploited first. |
+| `Shift+F3` | `/test` | Writes the one regression test that would have caught the bug you just fixed, matching your conventions. Must fail against the old behaviour or it isn't a regression test. |
+| `Shift+F4` | `/debt` | The three worst things ranked by **six-month cost, not ugliness**. "Leave it" is an allowed and frequently correct verdict. |
+| `Shift+F5` | `/user` | Walks your real entry path as a first-time user. Where confusion starts, which steps could be deleted, what breaks with no data or a typo. |
+| `Shift+F6` | `/handoff` | Overwrites `HANDOFF.md` so a zero-context session resumes exactly where you stopped. |
+| `Ctrl+F1` | `/cost` | Every paid model call in the repo, the monthly bill at stated usage, and the one call path responsible for most of it. |
+| `Ctrl+F2` | `/why` | Runs `git log -p --follow` on a file and explains why the code is that way from its real history — the scar tissue, and what was already tried and reverted. |
+| `Ctrl+F3` | `/simplify` | Three functions with the worst complexity-to-value ratio, each with a real diff and proof the complexity isn't earning its keep. |
+| `Ctrl+F4` | `/onboard` | Generates `CONTRIBUTING.md` from lockfiles, scripts and CI rather than boilerplate. |
+
+`Ctrl+Alt+P` opens a searchable palette of all sixteen. `Ctrl+Z` within two seconds of a fire interrupts Claude and toasts `cancelled`.
 
 Every skill is marked `disable-model-invocation: true`. These are deliberate manual triggers — Claude will never decide on its own that now is a good time to run `/ship`.
 
+**The skills work without any of this.** They are ordinary Claude Code slash commands; copy `skills/` into `~/.claude/skills/` and type `/redteam` by hand. See [skills/README.md](skills/README.md) — that directory is the most forkable part of this repo.
+
 ## Why F2 has teeth
 
-Most "review my code" prompts are answered from whatever the model remembers about your code, which drifts from what is actually on disk.
+Most "review my code" prompts get answered from whatever the model remembers, which drifts from what is on disk.
 
 `/redteam` opens with a dynamic-context line:
 
@@ -41,82 +55,51 @@ Most "review my code" prompts are answered from whatever the model remembers abo
 !`git diff HEAD`
 ```
 
-Claude Code executes that **before** the model reads the rest of the prompt, so the real working tree is already in context when the instructions arrive. The review is grounded in the code you are about to commit, not a recollection of it. `/orient` uses the same mechanism for `git log` and `git ls-files`.
+Claude Code executes that **before** the model reads the rest of the prompt, so your real working tree is already in context when the instructions arrive. The review is grounded in the code you are about to commit, not a recollection of it. `/orient` and `/why` use the same mechanism for `git log`.
 
-If the diff is empty, the skill is told to say so and stop, rather than inventing a review.
-
-## Install
-
-Requires Windows and [AutoHotkey v2](https://www.autohotkey.com/). `winget install AutoHotkey.AutoHotkey GitHub.cli Git.Git` covers the dependencies.
-
-```powershell
-git clone https://github.com/rrkher059/claude-whip
-cd claude-whip
-powershell -ExecutionPolicy Bypass -File .\gen-whip-wav.ps1   # synthesizes whip.wav
-```
-
-Install the sixteen skills and start it:
-
-```powershell
-Copy-Item .\skills\* "$env:USERPROFILE\.claude\skills\" -Recurse -Force
-.\whip.ahk
-```
-
-To start it with Windows, drop a shortcut to `whip.ahk` in `shell:startup`.
-
-`whip.wav` is generated, not downloaded — see `gen-whip-wav.ps1`. Nothing is fetched from the network at any point.
+If the diff is empty, the skill is told to say so and stop rather than inventing a review.
 
 ## Config
 
-`config.ini` is written with defaults on first run and is gitignored, so your local settings are yours.
+`config.ini` is written with defaults on first run and is gitignored, so your settings are yours.
 
 ```ini
 [whip]
-sound=              ; path to a custom wav; blank uses whip.wav next to the script
-titles=claude       ; comma-separated fragments matched against the active window title
+sound=              ; custom wav; blank uses whip.wav next to the script
+titles=claude       ; comma-separated fragments matched against the window title
 debug=0             ; 1 logs every non-matching window title to whip.log
 hud=1               ; the corner tab and its expanding binding list
 volume=1            ; 0 mutes
-animate=1           ; 0 skips the visuals entirely and just sends the command
+animate=1           ; 0 skips the visuals and just sends the command
 theme=leather       ; leather | midnight | ember | bone
 shake=1             ; one-frame screen shake on the snap
-hudcorner=br        ; tl | tr | bl | br - set by dragging the tab, saved here
-palette=^!p         ; command palette chord: ^ Ctrl, + Shift, ! Alt, # Win
-confirm=ship        ; comma-separated commands that need a double-tap first
+hudcorner=br        ; tl | tr | bl | br - set by dragging the tab
+palette=^!p         ; palette chord: ^ Ctrl, + Shift, ! Alt, # Win
+confirm=ship        ; commands that need a double-tap first
 
 [keys]
 F1=whip
-F2=redteam
 ...                 ; all sixteen are freely remappable
 ```
 
-Behavior follows the **command**, not the key: `ship` always double-taps to confirm and `decide` / `debt` / `why` always prompt for arguments, wherever you bind them. Remapping a binding therefore keeps its safety.
+Behaviour follows the **command**, not the key: `ship` always double-taps and `decide` / `debt` / `why` always prompt for arguments, wherever you bind them. Remapping keeps safety.
 
-### Which commands write something
+Tray menu: reload config, open config, open log, show stats, pick Claude window, show welcome, toggle HUD, pause hotkeys, exit.
 
-Five of the sixteen change state rather than just producing a reply:
+### Themes
 
-| command | what it writes |
-|---|---|
-| `/ship` | commits **and pushes** to the current branch |
-| `/decide` | appends to `DECISIONS.md` |
-| `/test` | adds a test file, then runs it |
-| `/handoff` | overwrites `HANDOFF.md` |
-| `/onboard` | overwrites `CONTRIBUTING.md` |
+Four ship in one table at the top of `whip.ahk`. Adding one is ten colours and a name:
 
-Only `/ship` requires a double-tap by default, because it is the only one that leaves your machine. The other four write a single file inside the repo, which `git checkout` undoes. If you want more of them guarded, list them:
-
-```ini
-confirm=ship,handoff,onboard
+```ahk
+"midnight", Map("g1","070910", "g2","0E131F", "under","04060A", "body","161C2B", "band","0F1420"
+             , "crk","1E2639", "hi","5B87C7", "core","E8F2FF", "ring","A8C8F0", "spark","D6E8FF"),
 ```
 
-A guarded command shows `press again to <command>` on the first tap and arms for 900ms. Anything not in the list fires immediately. Separately, **Ctrl+Z within 2 seconds of any fire** sends Escape to interrupt Claude and toasts `cancelled`; outside that window Ctrl+Z is not intercepted at all.
-
-Tray menu: reload config, open config, open log, pick Claude window, show welcome, toggle HUD, pause hotkeys, exit.
+`g1`/`g2` are the motion-blur ghosts, `under` the shadowed underside, `body` the leather, `band` the grip wraps, `crk` the cracker, `hi` the highlight, and `core`/`ring`/`spark` the snap. `bone` is deliberately the darkest body of the four — a pale whip is invisible on a light terminal, so the bone colour is the highlight, not the leather.
 
 ### Chains
 
-A binding whose value contains `|` runs its steps in order. Between steps you can put `wait <seconds>`:
+A binding whose value contains `|` runs its steps in order, with `wait <seconds>` available between them:
 
 ```ini
 [keys]
@@ -124,55 +107,58 @@ F7=redteam | wait 45 | test
 F8=secure | wait 60 | handoff
 ```
 
-Both are shipped commented out in the generated config. Keys outside the default sixteen work too — the whole `[keys]` section is read, so `F7`, `F8`, `Ctrl+F5` and so on are all available.
+Both ship commented out. The whole `[keys]` section is read, so `F7`, `F8` and anything else you add work. While a chain waits it toasts a countdown and **Escape cancels**.
 
-While a chain waits it toasts a countdown, and **Escape cancels it**. The HUD and the palette show a chain as `redteam +2` rather than the full string.
+**`wait-idle` is deliberately not implemented.** There is no reliable way to tell from outside the terminal that Claude has stopped producing output: the window title does not change, there is no exit code to wait on, and pixel-diffing the terminal is defeated by both a blinking cursor and a ticking token counter. A step that guessed wrong would fire the next command into a half-finished answer. If you put `wait-idle` in a chain it stops with an explicit message instead. Use a generous `wait`.
 
-**`wait-idle` is deliberately not implemented.** It was specified, and there is no reliable way to do it from outside the terminal: the window title does not change while Claude is working, there is no exit code to wait on, and the only remaining approach — diffing the terminal's pixels — is defeated by both a blinking cursor and a ticking token counter. A chain step that guessed wrong would fire the next command into a half-finished answer, which is worse than not having the feature. If you put `wait-idle` in a chain it stops with an explicit message rather than silently doing something unpredictable. Use `wait <seconds>` with a generous number.
+### Which commands write something
 
-### Why the palette is `Ctrl+Alt+P`, and how to pick your own
+| command | what it writes |
+|---|---|
+| `/ship` | commits **and pushes** |
+| `/decide` | appends to `DECISIONS.md` |
+| `/test` | adds a test file, then runs it |
+| `/handoff` | overwrites `HANDOFF.md` |
+| `/onboard` | overwrites `CONTRIBUTING.md` |
 
-`Ctrl+Shift+Space` is the obvious chord for a command palette, and it is the wrong one on Windows. Windows Terminal binds it by default:
+Only `/ship` double-taps by default, because it is the only one that leaves your machine. Add others with `confirm=ship,handoff,onboard`.
 
-```json
-{ "keys": "ctrl+shift+space", "id": "Terminal.OpenNewTabDropdown" }
-```
+### Picking a hotkey
 
-That binding lives in the app package's `defaults.json`, not in your `settings.json`, so it applies even when your own `keybindings` array is empty — which is to say, to almost everyone.
+**Check any chord against Windows Terminal's package `defaults.json` before binding it**, not just your own `settings.json` — the defaults apply even when your `keybindings` array is empty. Two that look free and are not:
 
-It does not actually break the palette: AutoHotkey's low-level keyboard hook sees the chord before Windows Terminal does, so the palette wins. The problem is the other direction. While claude-whip is running and your Claude window is focused, you would silently lose Windows Terminal's new-tab dropdown and never be told why. Shadowing a documented default of the host terminal is not a trade worth making for one keystroke.
-
-**Before binding anything, check it against both Windows Terminal's package defaults and your own `settings.json`.** Two chords that look free and are not:
-
-| chord | what it really does in Windows Terminal |
+| chord | what it really does |
 |---|---|
 | `Ctrl+Shift+Space` | `Terminal.OpenNewTabDropdown` |
 | `Ctrl+Shift+W` | `Terminal.ClosePane` — **closes your tab** |
 
-These ctrl+shift letters are unclaimed in Windows Terminal's defaults if you prefer one: **b e g h i j l o q r s u x y z**.
+These ctrl+shift letters are unclaimed in Windows Terminal: **b e g h i j l o q r s u x y z**.
 
-One caveat on the default: on international keyboard layouts AltGr sends Ctrl+Alt, so `Ctrl+Alt+P` can fire while you are typing. If you use such a layout, rebind `palette=` to one of the ctrl+shift letters above.
+The palette defaults to `Ctrl+Alt+P`. On international layouts AltGr sends Ctrl+Alt, so if you use one, rebind `palette=` to a ctrl+shift letter above.
 
-## Troubleshooting: the hotkeys do nothing
+## Troubleshooting
 
-This is almost always title detection. Every hotkey is scoped with `#HotIf IsClaude()`, which matches the `titles=` fragments against the active window title. If your terminal does not put "claude" in its title, nothing fires — by design, so that F1 stays F1 everywhere else.
+**Start here:**
 
-Fix it in four steps:
+```powershell
+.\whip.ahk --doctor
+```
 
-1. Set `debug=1` in `config.ini` and reload from the tray.
-2. Focus your Claude Code window and press any bound key.
-3. Open `whip.log`. It records every title that was checked and rejected:
-   ```
-   2026-09-20 21:09:30  no match: zsh — my-project
-   ```
-4. Paste a distinctive fragment of that real title into `titles=` (e.g. `titles=my-project,claude`) and reload.
+It prints your AutoHotkey version and path, display scaling, the wav's parsed header and measured peak amplitude, which of the sixteen skills are on disk, your current `titles=` and whether the focused window actually matches it, whether `config.ini` carries a UTF-8 BOM, and the last five errors — then a verdict. Paste that into an issue.
 
-`whip.log` also records how many hotkeys bound at startup (`bound 12/12 hotkeys`), which tells you immediately whether the problem is registration or detection.
+**The hotkeys do nothing.** Almost always title detection. Every hotkey is scoped so `F1` stays `F1` everywhere else; if your terminal doesn't put "claude" in its title, nothing fires. Fix it without touching a config file:
 
-Two more things worth knowing:
+```powershell
+.\whip.ahk --pick
+```
 
-- If `config.ini` is saved by an editor that adds a UTF-8 BOM, Windows' INI functions silently return defaults for **every** setting. `whip.ahk` detects and strips the BOM at startup, but if you are editing config by hand and nothing takes effect, that is the classic cause.
-- The overlay windows are `+E0x20 +Disabled`, so they are click-through and cannot take focus. If the whip ever appears to block you, it isn't — click straight through it.
+Pick your window from the list, trim the text to the part that never changes, save. It writes `titles=` for you. The tool also offers this by itself if a terminal stays focused for a minute without ever matching.
+
+**Nothing takes effect when I edit config.ini.** Check `--doctor` for `utf-8 bom`. Windows' INI functions do not skip a BOM, so an editor that adds one makes *every* setting silently fall back to its default. The tool strips it at startup, but that is the classic cause.
+
+**The whip blocks my terminal.** It cannot — the overlays are `WS_EX_TRANSPARENT | WS_EX_NOACTIVATE`, so they are click-through and can never take focus. Click straight through. If you want it gone anyway, `animate=0`.
+
+**Other flags:** `--test [speed]` plays one crack (`--test 1` for real time), `--palette` and `--stats` open those windows directly, `--welcome` reopens the intro.
 
 ---
 
@@ -180,46 +166,63 @@ Two more things worth knowing:
 
 This is the part worth stealing.
 
-AutoHotkey cannot draw an anti-aliased curve onto the desktop. What it *can* do is set an arbitrary polygonal **region** on a borderless window, which clips that window to any shape you like:
+AutoHotkey cannot draw an anti-aliased curve onto the desktop. What it *can* do is set an arbitrary polygonal **region** on a borderless window, clipping that window to any shape:
 
 ```ahk
-WinSetRegion(points " Polygon", "ahk_id " hwnd)
+WinSetRegion(points, "ahk_id " hwnd)
 ```
 
-A shaped window is a single flat color, so one window gives you a silhouette, not leather. The trick is that you are not limited to one window. `whip.ahk` stacks several click-through shaped windows and recomputes every region each frame:
+A shaped window is one flat colour, so one window gives you a silhouette, not leather. The trick is that you are not limited to one window. claude-whip stacks nine click-through shaped windows and recomputes every region each frame:
 
-| Layer | Color | Role |
-|---|---|---|
-| 2 ghost windows | `#2A1A0F`, `#3A2415` | The whip's shape at `t-0.10` and `t-0.05`, at ~15% and ~30% opacity. Motion blur. |
-| Body | `#4E3018` | The leather itself. |
-| Grip bands | `#2E1B0D` | Three short offset shapes near the handle, so it reads as bound leather rather than a stick. |
-| Highlight | `#8A6034` | The same centerline offset ~45% toward one edge and much thinner — light catching the top of the leather. |
-| Flash + 4 sparks | white | An ellipse-region window at the tip plus thin radiating spikes at 30°, 75°, 200°, 250°, shown for two frames at the snap. |
+| Layer | Role |
+|---|---|
+| 2 ghosts | The shape at `t-0.10` and `t-0.05`, at 15% and 30% opacity. Motion blur. |
+| Underside | The body offset down-and-right, darker. A shadowed edge. |
+| Body | The leather. |
+| Grip bands | Three short offset shapes, so the handle reads as bound leather rather than a stick. |
+| Cracker | The last 7%, its own colour, trailing the body by a beat. |
+| Highlight | Its own taper — widest mid-arc, gone before the tip. Not a scaled copy of the body. |
+| Core + arc + 6 shards | The snap. |
 
 Depth comes entirely from that layering. Collapse it to one window and it stops looking like leather.
 
 ### The traveling loop
 
-The gross shape is a cubic bezier: handle anchored off the right edge, tip sweeping upper-right to lower-left on a cubic ease-out, with control points that **lag** the tip and then snap past it (they are driven off `lag = 1-t`).
+The gross shape is a cubic bezier: handle anchored off the right edge, tip sweeping on a cubic ease-out, control points that **lag** the tip and then snap past it.
 
-But a moving bezier reads as a swinging rope, not a whip. What makes it a whip is the crack itself — a gaussian bump that *travels* from handle to tip. At each sample `s` along the curve, the point is offset perpendicular to its local tangent by:
+But a moving bezier reads as a swinging rope. What makes it a whip is the crack itself — a gaussian bump that *travels* from handle to tip. At each sample `s`, the point is offset perpendicular to its local tangent by:
 
 ```
 offset = amp * exp(-((s - p) / 0.20)^2)
 ```
 
-where `p = t*1.15 - 0.05` is the loop's position along the whip and `amp = 30*(1-t) + 7`, collapsing to ~25% once `t > 0.94`.
+where `p = t*1.15 - 0.05` is the loop's position along the whip and `amp = 30*(1-t) + 7`, collapsing once `t > 0.94`. `p` walks from handle to tip as `t` advances, so the bump runs down the leather and the tip snaps past it exactly as the amplitude collapses. That is the entire illusion.
 
-`p` walks from handle to tip as `t` advances, so the bump runs down the leather and the tip snaps past it right as the amplitude collapses. That is the entire illusion. Everything else — the taper (`7.6*(1-s)^1.45 + 0.8`, a fat grip and a 0.7px cracker), the ghosts, the highlight — is dressing on top of it.
+Timing carries the rest: 26 frames on a non-uniform budget — a slow wind-up where the whip pulls back with the tip lagging, fast frames through the loop travel, a held snap, then fade. A uniform frame time reads as a rope no matter how good the geometry is.
 
-Each polygon is built by walking forward along one perpendicular offset and back along the other, closing the shape. A frame whose region fails to apply is skipped rather than fatal, and the whole stack is hidden in a `finally` block, so an interrupted animation can never leave a window stranded on screen.
+### Two bugs worth knowing about if you do AHK overlays
+
+**`WinSetRegion` rejects the `Polygon` keyword.** Every v1 tutorial ends the point list with `" Polygon"`. AutoHotkey v2 throws `Parameter #1 is invalid` on it. Three or more bare points already form a polygon:
+
+```ahk
+WinSetRegion("256-432 2304-504 1280-1123", hwnd)        ; works
+WinSetRegion("256-432 2304-504 1280-1123 Polygon", hwnd) ; throws
+```
+
+Negative coordinates and 400-point polygons are both fine, so if regions are failing, neither is your cause.
+
+**`DetectHiddenWindows` defaults to off, and that breaks hidden overlays.** `ahk_id` cannot match a hidden window, so `WinSetRegion` and `WinSetTransparent` both fail with "Target window not found" — and if your `ShowWin` sets transparency *before* showing, the throw is swallowed and the window never appears at all. Put `DetectHiddenWindows(true)` at the top if you want to shape a window before showing it, which you do, because otherwise the first frame flashes a full-screen rectangle.
+
+A third one, less exotic but more annoying: `WS_EX_TRANSPARENT` makes a window click-through but **not** un-activatable. An overlay that takes activation and is then hidden leaves focus unsettled long enough to swallow the keystrokes you send immediately afterwards. Add `WS_EX_NOACTIVATE` (`+E0x08000020` for both).
 
 ### The sound
 
-`whip.wav` is synthesized by `gen-whip-wav.ps1` — 22050 Hz, 16-bit mono, 0.42s, written through a `BinaryWriter` with a hand-built RIFF/WAVE header.
+`whip.wav` is synthesized by `gen-whip-wav.ps1` — 22050 Hz, 16-bit mono, 0.42s, through a `BinaryWriter` with a hand-built RIFF/WAVE header. Nothing is downloaded, ever.
 
-- **Swish** (`t < 0.21s`): white noise through a one-pole lowpass `lp += k*(noise-lp)` whose cutoff opens from 0.04 to 0.59 while amplitude rises as `0.12*p³`. That is the leather accelerating.
-- **Crack** (`t >= 0.21s`): full-band noise on an `exp(-34p)` decay, mixed 0.72 raw / 0.28 filtered so it stays bright, with `0.18*sin(2π*190*p)*exp(-60p)` underneath to give it body instead of hissing static.
+- **Swish** (`t < 0.21s`): white noise through a one-pole lowpass whose cutoff opens from 0.04 to 0.59 while amplitude rises as `0.12*p³`. The leather accelerating.
+- **Crack** (`t >= 0.21s`): full-band noise on an `exp(-34p)` decay, mixed 0.72 raw / 0.28 filtered so it stays bright, with `0.18*sin(2π*190*p)*exp(-60p)` underneath for body.
+
+`p` is **seconds**, not normalised progress. That distinction is the whole sound: normalise it and `exp(-34p)` becomes a 6ms decay and the 190 Hz body becomes 190 cycles per 0.21s — 905 Hz, an audible beep. In seconds it is a 29ms decay and a real thump. Measured, that is the difference between 8ms and 39ms of audible crack.
 
 If `whip.wav` is missing it falls back to `SoundBeep` and keeps working.
 
