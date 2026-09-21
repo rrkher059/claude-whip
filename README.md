@@ -71,9 +71,13 @@ To start it with Windows, drop a shortcut to `whip.ahk` in `shell:startup`.
 sound=              ; path to a custom wav; blank uses whip.wav next to the script
 titles=claude       ; comma-separated fragments matched against the active window title
 debug=0             ; 1 logs every non-matching window title to whip.log
-hud=1               ; the bottom-right cheat sheet
+hud=1               ; the corner tab and its expanding binding list
 volume=1            ; 0 mutes
 animate=1           ; 0 skips the visuals entirely and just sends the command
+theme=leather       ; leather | midnight | ember | bone
+shake=1             ; one-frame screen shake on the snap
+hudcorner=br        ; tl | tr | bl | br - set by dragging the tab, saved here
+palette=^!p         ; command palette chord: ^ Ctrl, + Shift, ! Alt, # Win
 
 [keys]
 F1=whip
@@ -83,7 +87,30 @@ F2=redteam
 
 Behavior follows the **command**, not the key: `ship` always double-taps to confirm and `decide` / `debt` always prompt for arguments, wherever you bind them.
 
-Tray menu: reload config, open config, open log, toggle HUD, pause hotkeys, exit.
+Tray menu: reload config, open config, open log, pick Claude window, show welcome, toggle HUD, pause hotkeys, exit.
+
+### Why the palette is `Ctrl+Alt+P`, and how to pick your own
+
+`Ctrl+Shift+Space` is the obvious chord for a command palette, and it is the wrong one on Windows. Windows Terminal binds it by default:
+
+```json
+{ "keys": "ctrl+shift+space", "id": "Terminal.OpenNewTabDropdown" }
+```
+
+That binding lives in the app package's `defaults.json`, not in your `settings.json`, so it applies even when your own `keybindings` array is empty — which is to say, to almost everyone.
+
+It does not actually break the palette: AutoHotkey's low-level keyboard hook sees the chord before Windows Terminal does, so the palette wins. The problem is the other direction. While claude-whip is running and your Claude window is focused, you would silently lose Windows Terminal's new-tab dropdown and never be told why. Shadowing a documented default of the host terminal is not a trade worth making for one keystroke.
+
+**Before binding anything, check it against both Windows Terminal's package defaults and your own `settings.json`.** Two chords that look free and are not:
+
+| chord | what it really does in Windows Terminal |
+|---|---|
+| `Ctrl+Shift+Space` | `Terminal.OpenNewTabDropdown` |
+| `Ctrl+Shift+W` | `Terminal.ClosePane` — **closes your tab** |
+
+These ctrl+shift letters are unclaimed in Windows Terminal's defaults if you prefer one: **b e g h i j l o q r s u x y z**.
+
+One caveat on the default: on international keyboard layouts AltGr sends Ctrl+Alt, so `Ctrl+Alt+P` can fire while you are typing. If you use such a layout, rebind `palette=` to one of the ctrl+shift letters above.
 
 ## Troubleshooting: the hotkeys do nothing
 

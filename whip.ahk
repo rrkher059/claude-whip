@@ -159,6 +159,10 @@ for arg in A_Args {
         wantWelcome := true
     if (arg = "--pick")
         SetTimer(ShowPicker, -300)
+    ; calls ShowPalette directly, so the palette can be exercised without
+    ; depending on a synthetic keystroke reaching the hook
+    if (arg = "--palette")
+        SetTimer(ShowPalette, -300)
 }
 if (wantWelcome)
     ShowWelcome()
@@ -177,7 +181,7 @@ WriteDefaultCfg() {
     IniWrite("leather",IniPath, "whip", "theme")
     IniWrite("1",      IniPath, "whip", "shake")
     IniWrite("br",     IniPath, "whip", "hudcorner")
-    IniWrite("^+Space",IniPath, "whip", "palette")
+    IniWrite("^!p",    IniPath, "whip", "palette")
     for pair in DEFAULT_KEYS
         IniWrite(pair[2], IniPath, "keys", pair[1])
 }
@@ -215,7 +219,7 @@ LoadCfg() {
     Cfg["animate"] := IniRead(IniPath, "whip", "animate", "1") + 0
     Cfg["shake"]   := IniRead(IniPath, "whip", "shake",   "1") + 0
     Cfg["theme"]   := Trim(IniRead(IniPath, "whip", "theme", "leather"))
-    Cfg["palette"]   := Trim(IniRead(IniPath, "whip", "palette", "^+Space"))
+    Cfg["palette"]   := Trim(IniRead(IniPath, "whip", "palette", "^!p"))
     Cfg["hudcorner"] := Trim(IniRead(IniPath, "whip", "hudcorner", "br"))
     if (!InStr("tl tr bl br", Cfg["hudcorner"]))
         Cfg["hudcorner"] := "br"
@@ -822,8 +826,19 @@ ShortDesc(cmd, maxLen := 88) {
 ; ---------------------------------------------------------------------------
 ; HUD - a small tab by default, expanding to the full list on hover or Shift
 ; ---------------------------------------------------------------------------
+; "^+j" -> "Ctrl+Shift+J", for anything shown to a human.
+PrettyChord(c) {
+    out := ""
+    while (c != "" && InStr("^+!#", SubStr(c, 1, 1))) {
+        ch := SubStr(c, 1, 1)
+        out .= (ch = "^") ? "Ctrl+" : (ch = "+") ? "Shift+" : (ch = "!") ? "Alt+" : "Win+"
+        c := SubStr(c, 2)
+    }
+    return out . (StrLen(c) = 1 ? StrUpper(c) : c)
+}
+
 BuildHud() {
-    global HudTab, HudTabEdge, HudPanel, HudEdge, Keys
+    global HudTab, HudTabEdge, HudPanel, HudEdge, Keys, Cfg
     global HudTabShown, HudPanelShown, HudExpanded
     global HUD_TAB_W, HUD_TAB_H, HUD_PAN_W, HUD_PAN_H
 
@@ -867,7 +882,7 @@ BuildHud() {
     HudPanel.Add("Text", "x126 y24 w112 h96 BackgroundTrans c8A7F72", col2)
     HudPanel.SetFont("s7 Norm", "Consolas")
     HudPanel.Add("Text", "x0 y" (HUD_PAN_H - 16) " w" (HUD_PAN_W - 2) " h12 Center BackgroundTrans c6A6056"
-               , "Ctrl+Shift+Space for all commands")
+               , PrettyChord(Cfg["palette"]) " for all commands")
 }
 
 ; Where the tab sits inside the terminal, per the saved corner.
@@ -1246,6 +1261,7 @@ ArgRecall() {
 ShowPalette(*) {
     global Keys, PalWin, PalEdit, PalList, PalTarget, PalRows
 
+    LogLine("palette: opened")
     if (IsObject(PalWin)) {
         try PalWin.Destroy()
         PalWin := ""
