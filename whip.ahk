@@ -72,6 +72,7 @@ UndoTarget    := 0
 ArgHist       := []
 WelcomeWin    := ""
 StatsWin      := ""
+ChainAbort    := false
 NagWin        := ""
 PickWin       := ""
 PickList      := ""
@@ -204,6 +205,16 @@ WriteDefaultCfg() {
     IniWrite("ship",   IniPath, "whip", "confirm")
     for pair in DEFAULT_KEYS
         IniWrite(pair[2], IniPath, "keys", pair[1])
+
+    ; Two example chains, commented out. A binding whose value contains "|"
+    ; runs its steps in order.
+    try FileAppend("`n; --- chains -------------------------------------------------------`n"
+                 . "; A binding whose value contains | runs its steps in order. Between`n"
+                 . "; steps you can put 'wait <seconds>'. Uncomment to use:`n"
+                 . ";`n"
+                 . "; F7=redteam | wait 45 | test`n"
+                 . "; F8=secure | wait 60 | handoff`n"
+                 , IniPath, "UTF-8")
 }
 
 ; Windows' INI functions do not skip a UTF-8 BOM, so a config saved by an
@@ -285,11 +296,26 @@ LoadCfg() {
             ArgHist.Push(h)
     }
 
+    ; Read the whole [keys] section rather than only the known defaults, so a
+    ; user can add F7, F8 and so on - which is what makes chains useful.
     Keys := []
-    for pair in DEFAULT_KEYS {
-        cmd := Trim(IniRead(IniPath, "keys", pair[1], pair[2]))
-        if (cmd != "")
-            Keys.Push([pair[1], cmd])
+    raw := ""
+    try raw := IniRead(IniPath, "keys")
+    for line in StrSplit(raw, "`n") {
+        line := Trim(line, " `t`r")
+        if (line = "" || SubStr(line, 1, 1) = ";")
+            continue
+        eq := InStr(line, "=")
+        if (!eq)
+            continue
+        k := Trim(SubStr(line, 1, eq - 1))
+        v := Trim(SubStr(line, eq + 1))
+        if (k != "" && v != "")
+            Keys.Push([k, v])
+    }
+    if (Keys.Length = 0) {
+        for pair in DEFAULT_KEYS
+            Keys.Push([pair[1], pair[2]])
     }
 }
 
@@ -835,6 +861,10 @@ LoadDescs() {
     Descs := Map()
     for pair in Keys {
         cmd := pair[2], d := ""
+        if (InStr(cmd, "|")) {
+            Descs[cmd] := "chain: " cmd
+            continue
+        }
         f := EnvGet("USERPROFILE") "\.claude\skills\" cmd "\SKILL.md"
         if (FileExist(f)) {
             try {
@@ -901,7 +931,8 @@ BuildHud() {
     col1 := "", col2 := ""
     half := Ceil(Keys.Length / 2)
     for i, pair in Keys {
-        line := Format("{:-5}", KeyLabel(pair[1])) " " pair[2]
+        shown := IsChain(pair[2]) ? ChainLabel(pair[2]) : pair[2]
+        line := Format("{:-5}", KeyLabel(pair[1])) " " shown
         if (i <= half)
             col1 .= (col1 = "" ? "" : "`n") line
         else
@@ -1130,12 +1161,27 @@ Notify(msg) {
     SetTimer(() => ToolTip(), -1200)
 }
 
+IsChain(spec) {
+    return InStr(spec, "|") != 0
+}
+
+; "redteam | wait 45 | test" -> "redteam +2"
+ChainLabel(spec) {
+    steps := StrSplit(spec, "|")
+    return Trim(LTrim(Trim(steps[1]), "/")) " +" (steps.Length - 1)
+}
+
 Fire(key, cmd, *) {
     global Animating, Cfg, NeedsArgs, NeedsConfirm, ConfirmAt
     global LastFireAt, UndoUntil, UndoTarget
 
     if (Animating)                  ; ignore keys pressed mid-animation
         return
+
+    if (IsChain(cmd)) {
+        FireChain(key, cmd)
+        return
+    }
 
     if (NeedsConfirm.Has(cmd)) {
         if (A_TickCount - ConfirmAt > 900) {
@@ -1310,7 +1356,7 @@ ShowPalette(*) {
     PalEdit := PalWin.Add("Edit", "w680 Background201A14 cE8DCC8")
     PalEdit.OnEvent("Change", (*) => PalFilter())
     PalWin.SetFont("s9 Norm", "Consolas")
-    PalList := PalWin.Add("ListBox", "w680 r12 Background181410 cBFB3A4")
+    PalList := PalWin.Add("ListBox", "w680 r18 Background181410 cBFB3A4")
     PalList.OnEvent("DoubleClick", (*) => PalFire())
     go := PalWin.Add("Button", "x-200 y-200 w1 h1 Default", "go")
     go.OnEvent("Click", (*) => PalFire())
@@ -1341,7 +1387,10 @@ PalFilter() {
     items := [], PalRows := []
     for pair in Keys {
         label := KeyLabel(pair[1]), cmd := pair[2]
-        line := Format("{:-7}", label) Format("{:-10}", "/" cmd) ShortDesc(cmd, 74)
+        if (IsChain(cmd))
+            line := Format("{:-7}", label) Format("{:-12}", ChainLabel(cmd)) "chain: " SubStr(cmd, 1, 58)
+        else
+            line := Format("{:-7}", label) Format("{:-10}", "/" cmd) ShortDesc(cmd, 74)
         if (q = "" || InStr(line, q)) {
             items.Push(line)
             PalRows.Push(cmd)
@@ -1824,6 +1873,72 @@ Doctor() {
 
     Rule()
     Say(problems = 0 ? "VERDICT: healthy" : "VERDICT: " problems " problem(s) above")
+}
+
+; ---------------------------------------------------------------------------
+; chains
+; ---------------------------------------------------------------------------
+; A binding whose value contains "|" runs its steps in order, with optional
+; "wait <seconds>" between them.
+;
+; Only "wait" is supported. "wait-idle" - waiting until Claude Code stops
+; producing output - is deliberately NOT implemented: there is no reliable
+; signal for it from outside the terminal. The window title does not change,
+; there is no exit code to wait on, and the only remaining approach is
+; screen-diffing the terminal, which a blinking cursor and a ticking token
+; counter both defeat. A chain step that silently guessed wrong would fire
+; the next command into a half-finished answer, so the token is rejected
+; loudly instead.
+ChainWait(ms) {
+    global ChainAbort
+    waited := 0
+    while (waited < ms) {
+        if (ChainAbort || GetKeyState("Escape", "P")) {
+            ChainAbort := true
+            Toast("chain cancelled", 1200)
+            return false
+        }
+        left := Ceil((ms - waited) / 1000)
+        if (Mod(waited, 1000) = 0)
+            Toast("chain: waiting " left "s  (Esc cancels)", 1200)
+        Sleep(100)
+        waited += 100
+    }
+    return true
+}
+
+FireChain(key, spec) {
+    global ChainAbort
+    steps := []
+    for part in StrSplit(spec, "|") {
+        t := Trim(part)
+        if (t != "")
+            steps.Push(t)
+    }
+    if (!steps.Length)
+        return
+
+    ChainAbort := false
+    for i, st in steps {
+        if (ChainAbort)
+            return
+        if (RegExMatch(st, "i)^wait[ \t]+([0-9]+)$", &m)) {
+            if (!ChainWait(Integer(m[1]) * 1000))
+                return
+        } else if (RegExMatch(st, "i)^wait-idle\b")) {
+            LogLine("chain: 'wait-idle' is not supported (no reliable idle signal); chain stopped")
+            Toast("wait-idle unsupported - chain stopped", 2600)
+            return
+        } else if (RegExMatch(st, "i)^wait\b")) {
+            LogLine("chain: malformed step '" st "' - expected 'wait <seconds>'")
+            Toast("bad chain step: " st, 2600)
+            return
+        } else {
+            cmd := LTrim(st, "/ `t")
+            Toast("chain " i "/" steps.Length ": /" cmd, 1200)
+            Fire(key, cmd)
+        }
+    }
 }
 
 ; ---------------------------------------------------------------------------

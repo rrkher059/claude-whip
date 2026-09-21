@@ -114,6 +114,22 @@ A guarded command shows `press again to <command>` on the first tap and arms for
 
 Tray menu: reload config, open config, open log, pick Claude window, show welcome, toggle HUD, pause hotkeys, exit.
 
+### Chains
+
+A binding whose value contains `|` runs its steps in order. Between steps you can put `wait <seconds>`:
+
+```ini
+[keys]
+F7=redteam | wait 45 | test
+F8=secure | wait 60 | handoff
+```
+
+Both are shipped commented out in the generated config. Keys outside the default sixteen work too — the whole `[keys]` section is read, so `F7`, `F8`, `Ctrl+F5` and so on are all available.
+
+While a chain waits it toasts a countdown, and **Escape cancels it**. The HUD and the palette show a chain as `redteam +2` rather than the full string.
+
+**`wait-idle` is deliberately not implemented.** It was specified, and there is no reliable way to do it from outside the terminal: the window title does not change while Claude is working, there is no exit code to wait on, and the only remaining approach — diffing the terminal's pixels — is defeated by both a blinking cursor and a ticking token counter. A chain step that guessed wrong would fire the next command into a half-finished answer, which is worse than not having the feature. If you put `wait-idle` in a chain it stops with an explicit message rather than silently doing something unpredictable. Use `wait <seconds>` with a generous number.
+
 ### Why the palette is `Ctrl+Alt+P`, and how to pick your own
 
 `Ctrl+Shift+Space` is the obvious chord for a command palette, and it is the wrong one on Windows. Windows Terminal binds it by default:
