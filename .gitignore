@@ -1,3 +1,10 @@
-﻿whip.log
+# local runtime state - yours, not the repo's
+whip.log
 config.ini
 
+# local claude code permission state
+.claude/settings.local.json
+
+# windows cruft
+Thumbs.db
+desktop.ini
